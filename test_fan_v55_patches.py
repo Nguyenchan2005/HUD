@@ -4096,3 +4096,918 @@ def test_step11_restoration_worker_requires_base_context():
                 "HUD_FAN_V5_5_"
                 "STEP11_RESTORATION_PROBE_JOB_V1",
         })
+
+
+def test_step11_parallel_jacobian_recovers_one_sided_fd(
+    monkeypatch,
+):
+    """Một phía invalid phải fallback sang one-sided derivative."""
+
+    import pipeline_v55
+
+    config = json.loads(
+        (
+            Path(
+                __file__
+            ).resolve().parent
+            /
+            "config_v55.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    cfg = copy.deepcopy(
+        config[
+            "surface_fit"
+        ][
+            "step11_topology_restoration"
+        ]
+    )
+
+    common = {
+        "restoration_cfg":
+            cfg,
+
+        "descriptors": [
+            {
+                "surface":
+                    "M2",
+
+                "kind":
+                    "CURVATURE",
+            }
+        ],
+    }
+
+    def fake_evaluate(
+        common_arg,
+        normalized,
+        *,
+        include_payload,
+    ):
+        """Mock evaluation for one-sided FD recovery test."""
+        u = np.asarray(
+            normalized,
+            float,
+        )
+
+        # Negative side intentionally invalid.
+        if u[0] < 0.0:
+            return {
+                "valid": False,
+                "reason": "SYNTHETIC_NEGATIVE_BOUND",
+            }
+
+        return {
+            "valid": True,
+            "reason": None,
+            "residual":
+                np.asarray([
+                    u[0]
+                ]),
+            "objective":
+                float(
+                    u[0]
+                    *
+                    u[0]
+                ),
+            "meta": {},
+            "bound_state": {
+                "valid": True,
+            },
+        }
+
+    monkeypatch.setattr(
+        pipeline_v55,
+        "_step11_evaluate_restoration_u",
+        fake_evaluate,
+    )
+
+    jacobian, active, rows = (
+        pipeline_v55.
+        _step11_build_parallel_jacobian(
+            common,
+            np.zeros(
+                1,
+                dtype=float,
+            ),
+            np.zeros(
+                1,
+                dtype=float,
+            ),
+            1,
+            1.0,
+            None,
+            1,
+        )
+    )
+
+    assert active == [
+        0
+    ]
+
+    assert np.isclose(
+        jacobian[
+            0,
+            0
+        ],
+        1.0,
+        atol=1e-9,
+    )
+
+    assert any(
+        row[
+            "fd_mode"
+        ]
+        ==
+        "FORWARD"
+        for row in rows
+    )
+
+
+def test_step11_joint_restoration_solver_converges_end_to_end(
+    monkeypatch,
+):
+    """Jacobian + LM + rho acceptance phải thật sự di chuyển tới basin feasible."""
+
+    import pipeline_v55
+    from pipeline_v55 import Context
+
+    config = json.loads(
+        (
+            Path(
+                __file__
+            ).resolve().parent
+            /
+            "config_v55.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    cfg = copy.deepcopy(
+        config[
+            "surface_fit"
+        ][
+            "step11_topology_restoration"
+        ]
+    )
+
+    cfg[
+        "maximum_iterations"
+    ] = 10
+
+    ctx = Context(
+        config={
+            "execution": {
+                "parallel_step11_candidates":
+                    False,
+
+                "step11_candidate_workers":
+                    1,
+
+                "step11_worker_memory_estimate_gib":
+                    1.0,
+            }
+        }
+    )
+
+    target = np.asarray([
+        0.20,
+        -0.12,
+    ])
+
+    descriptors = [
+        {
+            "surface":
+                "M1",
+
+            "kind":
+                "CURVATURE",
+        },
+
+        {
+            "surface":
+                "M2",
+
+            "kind":
+                "CURVATURE",
+        },
+    ]
+
+    common = {
+        "ctx":
+            ctx,
+
+        "restoration_cfg":
+            cfg,
+
+        "descriptors":
+            descriptors,
+    }
+
+    def fake_evaluate(
+        common_arg,
+        normalized,
+        *,
+        include_payload,
+    ):
+        """Mock evaluation for convergence test."""
+
+        u = np.asarray(
+            normalized,
+            float,
+        )
+
+        residual = (
+            u
+            -
+            target
+        )
+
+        distance = float(
+            np.linalg.norm(
+                residual
+            )
+        )
+
+        hard_pass = bool(
+            distance < 0.03
+        )
+
+        meta = {
+            "M1_raw_topology_pass":
+                True,
+
+            "M2_raw_topology_pass":
+                hard_pass,
+
+            "unobscured":
+                hard_pass,
+
+            "S_AQP_signed_mm2":
+                (
+                    1.0
+                    if hard_pass
+                    else
+                    -distance
+                ),
+
+            "M2_oriented_H_min_per_mm":
+                (
+                    1e-4
+                    if hard_pass
+                    else
+                    -distance
+                ),
+
+            "M2_KG_min_per_mm2":
+                (
+                    -5e-8
+                    if hard_pass
+                    else
+                    -distance
+                    *
+                    1e-5
+                ),
+        }
+
+        result = {
+            "valid":
+                True,
+
+            "reason":
+                None,
+
+            "residual":
+                residual,
+
+            "objective":
+                float(
+                    np.mean(
+                        residual
+                        *
+                        residual
+                    )
+                ),
+
+            "meta":
+                meta,
+
+            "bound_state": {
+                "valid":
+                    True,
+            },
+        }
+
+        if include_payload:
+
+            result.update({
+                "m1":
+                    "SYNTHETIC_M1",
+
+                "m2":
+                    "SYNTHETIC_M2",
+
+                "evaluation":
+                    {},
+            })
+
+        return result
+
+    monkeypatch.setattr(
+        pipeline_v55,
+        "_step11_evaluate_restoration_u",
+        fake_evaluate,
+    )
+
+    restoration = (
+        pipeline_v55.
+        _step11_run_joint_topology_restoration(
+            common,
+            lambda message:
+                None,
+        )
+    )
+
+    assert restoration[
+        "success"
+    ]
+
+    assert restoration[
+        "failure_message"
+    ] is None
+
+    assert (
+        np.linalg.norm(
+            np.asarray(
+                restoration[
+                    "u"
+                ],
+                float,
+            )
+            -
+            target
+        )
+        <
+        0.05
+    )
+
+    assert any(
+        bool(
+            row.get(
+                "accepted",
+                False,
+            )
+        )
+        for row
+        in restoration[
+            "history"
+        ]
+    )
+
+
+def test_step11_joint_restoration_nonconvergence_returns_diagnostics(
+    monkeypatch,
+):
+    """Không hội tụ phải trả history thay vì raise bên trong solver."""
+
+    import pipeline_v55
+    from pipeline_v55 import Context
+
+    config = json.loads(
+        (
+            Path(
+                __file__
+            ).resolve().parent
+            /
+            "config_v55.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    cfg = copy.deepcopy(
+        config[
+            "surface_fit"
+        ][
+            "step11_topology_restoration"
+        ]
+    )
+
+    cfg[
+        "maximum_iterations"
+    ] = 2
+
+    ctx = Context(
+        config={
+            "execution": {
+                "parallel_step11_candidates":
+                    False,
+
+                "step11_candidate_workers":
+                    1,
+
+                "step11_worker_memory_estimate_gib":
+                    1.0,
+            }
+        }
+    )
+
+    common = {
+        "ctx":
+            ctx,
+
+        "restoration_cfg":
+            cfg,
+
+        "descriptors": [
+            {
+                "surface":
+                    "M2",
+
+                "kind":
+                    "CURVATURE",
+            }
+        ],
+    }
+
+    def fake_constant_evaluate(
+        common_arg,
+        normalized,
+        *,
+        include_payload,
+    ):
+        """Mock evaluation for nonconvergence diagnostics test."""
+
+        result = {
+            "valid":
+                True,
+
+            "reason":
+                None,
+
+            # Constant residual -> Jacobian zero.
+            "residual":
+                np.asarray([
+                    1.0
+                ]),
+
+            "objective":
+                1.0,
+
+            "meta": {
+                "M1_raw_topology_pass":
+                    True,
+
+                "M2_raw_topology_pass":
+                    False,
+
+                "unobscured":
+                    False,
+
+                "S_AQP_signed_mm2":
+                    -10.0,
+
+                "M2_oriented_H_min_per_mm":
+                    -0.01,
+
+                "M2_KG_min_per_mm2":
+                    -1e-4,
+            },
+
+            "bound_state": {
+                "valid":
+                    True,
+            },
+        }
+
+        if include_payload:
+
+            result.update({
+                "m1":
+                    "M1",
+
+                "m2":
+                    "M2",
+
+                "evaluation":
+                    {},
+            })
+
+        return result
+
+    monkeypatch.setattr(
+        pipeline_v55,
+        "_step11_evaluate_restoration_u",
+        fake_constant_evaluate,
+    )
+
+    restoration = (
+        pipeline_v55.
+        _step11_run_joint_topology_restoration(
+            common,
+            lambda message:
+                None,
+        )
+    )
+
+    assert not restoration[
+        "success"
+    ]
+
+    assert restoration[
+        "failure_message"
+    ] is not None
+
+    assert restoration[
+        "stop_reason"
+    ] in {
+        "MAXIMUM_ITERATIONS",
+        "JACOBIAN_RANK_ZERO",
+    }
+
+    assert len(
+        restoration[
+            "jacobian_history"
+        ]
+    ) > 0
+
+
+def test_step11_unobscuration_violation_enters_restoration_residual(
+    monkeypatch,
+):
+    """Signed area âm phải tạo residual; signed area dương phải bằng zero."""
+
+    import pipeline_v55
+
+    dummy_field = {
+        "z_mm":
+            np.zeros(1),
+
+        "normal":
+            np.asarray([
+                [
+                    0.0,
+                    0.0,
+                    1.0,
+                ]
+            ]),
+
+        "H_per_mm":
+            np.zeros(1),
+
+        "KG_per_mm2":
+            np.zeros(1),
+
+        "k1_per_mm":
+            np.zeros(1),
+
+        "k2_per_mm":
+            np.zeros(1),
+
+        "oriented_H_per_mm":
+            np.zeros(1),
+
+        "gradient_k1_per_mm2":
+            np.zeros(0),
+
+        "gradient_k2_per_mm2":
+            np.zeros(0),
+    }
+
+    monkeypatch.setattr(
+        pipeline_v55,
+        "_step11_curvature_field",
+        lambda *args, **kwargs:
+            dummy_field,
+    )
+
+    monkeypatch.setattr(
+        pipeline_v55,
+        "_step11_surface_restoration_blocks",
+        lambda *args, **kwargs:
+            [],
+    )
+
+    state = {
+        "cfg": {
+            "physical_fraction_scale":
+                0.1,
+
+            "weights": {
+                "physical_fraction":
+                    0.0,
+
+                "unobscuration":
+                    1.0,
+
+                "optical":
+                    0.0,
+            },
+        },
+
+        "surface_fit_cfg": {
+            "curvature_absolute_max_per_mm":
+                1.0,
+        },
+
+        "quality_cfg": {
+            "minimum_physical_fraction":
+                0.0,
+        },
+
+        "grids": {
+            "M1": {},
+            "M2": {},
+        },
+
+        "anchors": {
+            "M1": {},
+            "M2": {},
+        },
+
+        "orientation_signs": {
+            "M1": 1.0,
+            "M2": 1.0,
+        },
+
+        "optical_indices":
+            np.empty(
+                0,
+                dtype=int,
+            ),
+
+        "unobscuration_scale_mm2":
+            2.0,
+    }
+
+    evaluation_bad = {
+        "optical_residual":
+            np.empty(
+                0,
+                dtype=float,
+            ),
+
+        "metrics": {
+            "physical_fraction":
+                1.0,
+        },
+
+        "M1_gate": {
+            "topology_pass":
+                True,
+        },
+
+        "M2_gate": {
+            "topology_pass":
+                True,
+        },
+
+        "S_AQP_signed_mm2":
+            -4.0,
+    }
+
+    residual_bad, meta_bad = (
+        pipeline_v55.
+        _step11_build_restoration_residual(
+            object(),
+            object(),
+            evaluation_bad,
+            state,
+        )
+    )
+
+    evaluation_good = dict(
+        evaluation_bad
+    )
+
+    evaluation_good[
+        "S_AQP_signed_mm2"
+    ] = 4.0
+
+    residual_good, meta_good = (
+        pipeline_v55.
+        _step11_build_restoration_residual(
+            object(),
+            object(),
+            evaluation_good,
+            state,
+        )
+    )
+
+    assert residual_bad[
+        -1
+    ] > 0.0
+
+    assert np.isclose(
+        residual_bad[
+            -1
+        ],
+        2.0,
+    )
+
+    assert np.isclose(
+        residual_good[
+            -1
+        ],
+        0.0,
+    )
+
+    assert not meta_bad[
+        "unobscured"
+    ]
+
+    assert meta_good[
+        "unobscured"
+    ]
+
+
+def test_step11_gamma_restoration_seed_prefers_less_bad_m2():
+    """Gamma seed phải dùng topology distance thay vì đòi M2 feasible."""
+
+    from pipeline_v55 import (
+        _step11_gamma_restoration_seed_rank_key,
+    )
+
+    config = json.loads(
+        (
+            Path(
+                __file__
+            ).resolve().parent
+            /
+            "config_v55.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    cfg = (
+        config[
+            "surface_fit"
+        ][
+            "step11_topology_restoration"
+        ]
+    )
+
+    worse = {
+        "M2_basic_surface_sanity_pass":
+            True,
+
+        "M2_integrability_status":
+            "WARN",
+
+        "M2_oriented_H_min_per_mm":
+            -0.008,
+
+        "M2_KG_min_per_mm2":
+            -2e-5,
+    }
+
+    better = {
+        "M2_basic_surface_sanity_pass":
+            True,
+
+        "M2_integrability_status":
+            "WARN",
+
+        "M2_oriented_H_min_per_mm":
+            -0.001,
+
+        "M2_KG_min_per_mm2":
+            -2e-6,
+    }
+
+    key_worse = (
+        _step11_gamma_restoration_seed_rank_key(
+            worse,
+            1.0,
+            0,
+            cfg,
+        )
+    )
+
+    key_better = (
+        _step11_gamma_restoration_seed_rank_key(
+            better,
+            0.85,
+            1,
+            cfg,
+        )
+    )
+
+    assert (
+        key_better
+        <
+        key_worse
+    )
+
+
+def test_step11_disabled_restoration_only_evaluates_seed(
+    monkeypatch,
+):
+    """Disabled mode không được dựng Jacobian hay chạy LM."""
+
+    import pipeline_v55
+
+    common = {
+        "descriptors": [
+            {
+                "surface":
+                    "M1",
+
+                "kind":
+                    "CURVATURE",
+            }
+        ],
+    }
+
+    calls = {
+        "evaluate":
+            0,
+    }
+
+    def fake_evaluate(
+        common_arg,
+        normalized,
+        *,
+        include_payload,
+    ):
+        """Mock evaluation for disabled restoration test."""
+
+        calls[
+            "evaluate"
+        ] += 1
+
+        return {
+            "valid":
+                True,
+
+            "objective":
+                0.0,
+
+            "meta": {
+                "M1_raw_topology_pass":
+                    True,
+
+                "M2_raw_topology_pass":
+                    True,
+
+                "unobscured":
+                    True,
+
+                "S_AQP_signed_mm2":
+                    1.0,
+
+                "M2_oriented_H_min_per_mm":
+                    0.001,
+
+                "M2_KG_min_per_mm2":
+                    0.0,
+            },
+
+            "m1":
+                "M1",
+
+            "m2":
+                "M2",
+
+            "evaluation":
+                {},
+        }
+
+    monkeypatch.setattr(
+        pipeline_v55,
+        "_step11_evaluate_restoration_u",
+        fake_evaluate,
+    )
+
+    result = (
+        pipeline_v55.
+        _step11_disabled_restoration_result(
+            common,
+            lambda message:
+                None,
+        )
+    )
+
+    assert result[
+        "success"
+    ]
+
+    assert calls[
+        "evaluate"
+    ] == 1
+
+    assert result[
+        "effective_workers"
+    ] == 0
+
+    assert (
+        result[
+            "stop_reason"
+        ]
+        ==
+        "RESTORATION_DISABLED_SEED_HARD_FEASIBLE"
+    )

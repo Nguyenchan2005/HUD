@@ -738,7 +738,12 @@ STEP_EXPLANATIONS_VI = {
     8: "Tách reference động của Fan khỏi lưới ảnh ảo cố định dùng đo distortion.",
     9: "Khi M2 còn phẳng, tạo target M1 bằng phép đối xứng liên hợp qua M2.",
     10: "Dựng point cloud và normal của M1 theo CI point-by-point, bắt đầu từ chief ray.",
-    11: "Từ M1 CI, search M1 O2 theo DOF chuẩn hóa vật lý; chỉ hard-gate basic sanity, ray-facing single-bowl topology và unobscuration; CI fit, shape quality, integrability và physical-fraction target là quality diagnostics/soft ranking trước khi chọn bằng chief-centered spot RMS.",
+    11: (
+        "Fit M1 O2 từ M1 CI, dựng M2 CI một lần rồi joint-restoration "
+        "M1/M2 O2 trên fixed residual grid bằng parallel finite-difference "
+        "Jacobian và damped LM; topology và unobscuration được dẫn hướng "
+        "bằng residual liên tục nhưng vẫn phải qua hard certification cuối."
+    ),
     12: "Nhận best M1/M2 O2 pair từ STEP11 rồi joint-refine bằng actual physical ray trace; chỉ topology và unobscuration còn là hard acceptance, còn fit quality và physical-fraction target được báo PASS/WARN theo cấu hình.",
     13: "Kết thúc shortcut phẳng và chuyển sang Fan Step Two dùng Fermat.",
     14: "Giải điểm target trên M2 sao cho hai đạo hàm optical path đều gần bằng 0.",
@@ -1375,6 +1380,7 @@ def validate_config(c: dict[str, Any]) -> None:
         "M2_normal_trust",
 
         "physical_fraction",
+        "unobscuration",
         "optical",
     }
 
@@ -15683,6 +15689,127 @@ def _step11_apply_joint_restoration_vector(
     )
 
 
+def _step11_unobscuration_state(
+    ctx: Context,
+    m2: PolySurface,
+    trace: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Đánh giá signed-area unobscuration trên physical trace hiện tại.
+
+    Đây là cùng định nghĩa MF2 mà STEP11 final certification sử dụng:
+        S_AQP_signed_mm2 >= 0  -> unobscured
+        S_AQP_signed_mm2 < 0   -> obscured
+    """
+
+    physical_valid = np.asarray(
+        trace[
+            "valid"
+        ],
+        bool,
+    )
+
+    if (
+        physical_valid.ndim != 1
+        or not np.any(
+            physical_valid
+        )
+    ):
+        raise RuntimeError(
+            "STEP11_UNOBSCURATION_NO_VALID_PHYSICAL_RAYS"
+        )
+
+    try:
+
+        mf2 = mf2_geometry(
+            np.asarray(
+                trace[
+                    "points"
+                ][0],
+                float,
+            )[
+                physical_valid
+            ],
+
+            np.asarray(
+                trace[
+                    "points"
+                ][1],
+                float,
+            )[
+                physical_valid
+            ],
+
+            np.asarray(
+                trace[
+                    "points"
+                ][2],
+                float,
+            )[
+                physical_valid
+            ],
+
+            m2,
+
+            float(
+                ctx.config[
+                    "fan_weights"
+                ][
+                    "omega2"
+                ]
+            ),
+
+            ctx.data[
+                "n_obs"
+            ],
+        )
+
+    except (
+        RuntimeError,
+        ValueError,
+        FloatingPointError,
+    ) as exc:
+
+        raise RuntimeError(
+            "STEP11_UNOBSCURATION_EVALUATION_FAILED:"
+            f"{type(exc).__name__}:{exc}"
+        ) from exc
+
+    signed_area = float(
+        mf2[
+            "S_AQP_signed_mm2"
+        ]
+    )
+
+    if not np.isfinite(
+        signed_area
+    ):
+        raise RuntimeError(
+            "STEP11_UNOBSCURATION_SIGNED_AREA_NONFINITE"
+        )
+
+    return {
+        "mf2":
+            mf2,
+
+        "S_AQP_signed_mm2":
+            signed_area,
+
+        "unobscured":
+            bool(
+                signed_area >= 0.0
+            ),
+
+        "violation_mm2":
+            float(
+                max(
+                    0.0,
+                    -signed_area,
+                )
+            ),
+    }
+
+
 def _step11_evaluate_restoration_pair(
     ctx: Context,
     m1: PolySurface,
@@ -15824,6 +15951,29 @@ def _step11_evaluate_restoration_pair(
                 "RESTORATION_OPTICAL_RESIDUAL_INVALID",
         }
 
+    try:
+
+        unobscuration = (
+            _step11_unobscuration_state(
+                ctx,
+                m2,
+                trace,
+            )
+        )
+
+    except (
+        RuntimeError,
+        ValueError,
+        FloatingPointError,
+    ) as exc:
+
+        return {
+            "valid": False,
+
+            "reason":
+                f"{type(exc).__name__}:{exc}",
+        }
+
     return {
         "valid": True,
 
@@ -15843,6 +15993,25 @@ def _step11_evaluate_restoration_pair(
 
         "M2_gate":
             m2_gate,
+
+        "mf2":
+            unobscuration[
+                "mf2"
+            ],
+
+        "S_AQP_signed_mm2":
+            float(
+                unobscuration[
+                    "S_AQP_signed_mm2"
+                ]
+            ),
+
+        "unobscured":
+            bool(
+                unobscuration[
+                    "unobscured"
+                ]
+            ),
     }
 
 
@@ -15996,6 +16165,42 @@ def _step11_build_restoration_residual(
         )
     )
 
+    signed_area = float(
+        evaluation[
+            "S_AQP_signed_mm2"
+        ]
+    )
+
+    if not np.isfinite(
+        signed_area
+    ):
+        raise RuntimeError(
+            "STEP11_UNOBSCURATION_RESIDUAL_NONFINITE"
+        )
+
+    unobscuration_violation = np.asarray([
+        max(
+            0.0,
+            -signed_area,
+        )
+    ])
+
+    blocks.append(
+        _step11_balanced_block(
+            unobscuration_violation,
+
+            float(
+                state[
+                    "unobscuration_scale_mm2"
+                ]
+            ),
+
+            weights[
+                "unobscuration"
+            ],
+        )
+    )
+
     residual = np.concatenate(
         blocks
     )
@@ -16133,6 +16338,22 @@ def _step11_build_restoration_residual(
 
         "physical_fraction":
             physical_fraction,
+
+        "S_AQP_signed_mm2":
+            signed_area,
+
+        "unobscured":
+            bool(
+                signed_area >= 0.0
+            ),
+
+        "unobscuration_violation_mm2":
+            float(
+                max(
+                    0.0,
+                    -signed_area,
+                )
+            ),
 
         "residual_length":
             int(
@@ -16661,6 +16882,182 @@ def _step11_gamma_anchor_rank_key(
     )
 
 
+def _step11_gamma_restoration_seed_rank_key(
+    record: dict[str, Any],
+    gamma: float,
+    gamma_index: int,
+    restoration_cfg: dict[str, Any],
+) -> tuple[Any, ...]:
+    """
+    Chọn gamma để làm SEED cho restoration,
+    không yêu cầu M2 đã topology PASS.
+
+    Priority:
+      1. M2 basic sanity có thể đánh giá được
+      2. integrability PASS/WARN
+      3. H/KG càng gần restoration target càng tốt
+      4. gamma càng gần 1 càng tốt
+    """
+
+    integrability_status = str(
+        record.get(
+            "M2_integrability_status",
+            "NOT_EVALUATED",
+        )
+    )
+
+    if integrability_status == "PASS":
+
+        integrability_rank = 0
+
+    elif integrability_status == "WARN":
+
+        integrability_rank = 1
+
+    else:
+
+        integrability_rank = 2
+
+    basic_sanity_rank = (
+        0
+        if bool(
+            record.get(
+                "M2_basic_surface_sanity_pass",
+                False,
+            )
+        )
+        else 1
+    )
+
+    h_raw = record.get(
+        "M2_oriented_H_min_per_mm"
+    )
+
+    kg_raw = record.get(
+        "M2_KG_min_per_mm2"
+    )
+
+    try:
+        h_value = float(
+            h_raw
+        )
+    except (
+        TypeError,
+        ValueError,
+    ):
+        h_value = float("nan")
+
+    try:
+        kg_value = float(
+            kg_raw
+        )
+    except (
+        TypeError,
+        ValueError,
+    ):
+        kg_value = float("nan")
+
+    if np.isfinite(
+        h_value
+    ):
+
+        h_violation = max(
+            0.0,
+            float(
+                restoration_cfg[
+                    "h_target_per_mm"
+                ]
+            )
+            -
+            h_value,
+        )
+
+        h_normalized = (
+            h_violation
+            /
+            float(
+                restoration_cfg[
+                    "mean_curvature_scale_per_mm"
+                ]
+            )
+        )
+
+    else:
+
+        h_normalized = float(
+            "inf"
+        )
+
+    if np.isfinite(
+        kg_value
+    ):
+
+        kg_violation = max(
+            0.0,
+            float(
+                restoration_cfg[
+                    "kg_target_per_mm2"
+                ]
+            )
+            -
+            kg_value,
+        )
+
+        kg_normalized = (
+            kg_violation
+            /
+            float(
+                restoration_cfg[
+                    "gaussian_curvature_scale_per_mm2"
+                ]
+            )
+        )
+
+    else:
+
+        kg_normalized = float(
+            "inf"
+        )
+
+    topology_distance = (
+        h_normalized
+        +
+        kg_normalized
+    )
+
+    return (
+        int(
+            basic_sanity_rank
+        ),
+
+        int(
+            integrability_rank
+        ),
+
+        float(
+            topology_distance
+        ),
+
+        float(
+            h_normalized
+        ),
+
+        float(
+            kg_normalized
+        ),
+
+        abs(
+            float(gamma)
+            -
+            1.0
+        ),
+
+        int(
+            gamma_index
+        ),
+    )
+
+
 def _step11_condition_m2_ci(
     ctx: Context,
     starts: np.ndarray,
@@ -17070,11 +17467,45 @@ def _step11_build_restoration_seed(
         )
     )
 
-    if not bool(
-        m1_gate[
-            "topology_pass"
+    require_raw_m1 = bool(
+        common[
+            "restoration_cfg"
+        ][
+            "require_m1_raw_topology"
         ]
-    ):
+    )
+
+    if require_raw_m1:
+
+        m1_seed_admitted = bool(
+            m1_gate[
+                "topology_pass"
+            ]
+        )
+
+    else:
+
+        m1_seed_admission = (
+            _step11_topology_admission(
+                m1_gate,
+                str(
+                    common[
+                        "topology_enforcement"
+                    ][
+                        "M1"
+                    ]
+                ),
+            )
+        )
+
+        m1_seed_admitted = bool(
+            m1_seed_admission[
+                "admitted"
+            ]
+        )
+
+    if not m1_seed_admitted:
+
         raise RuntimeError(
             "STEP11_RESTORATION_"
             "SEED_M1_TOPOLOGY_INVALID:"
@@ -18325,6 +18756,557 @@ def _step11_build_parallel_jacobian(
     )
 
 
+def _step11_restoration_hard_feasible(
+    meta: dict[str, Any],
+) -> bool:
+    """
+    Điều kiện tối thiểu để STEP11 restoration được phép kết thúc.
+
+    Optical quality vẫn để STEP12 refine tiếp.
+    """
+
+    return bool(
+        meta[
+            "M1_raw_topology_pass"
+        ]
+        and
+        meta[
+            "M2_raw_topology_pass"
+        ]
+        and
+        meta[
+            "unobscured"
+        ]
+    )
+
+
+def _step11_disabled_restoration_result(
+    common: dict[str, Any],
+    progress: Callable[
+        [str],
+        None,
+    ],
+) -> dict[str, Any]:
+    """
+    Khi restoration.enabled=false:
+    không chạy Jacobian/LM, chỉ đánh giá seed hiện có.
+    """
+
+    descriptors = common[
+        "descriptors"
+    ]
+
+    u = np.zeros(
+        len(
+            descriptors
+        ),
+        dtype=float,
+    )
+
+    current = (
+        _step11_evaluate_restoration_u(
+            common,
+            u,
+            include_payload=True,
+        )
+    )
+
+    if not bool(
+        current.get(
+            "valid",
+            False,
+        )
+    ):
+        raise RuntimeError(
+            "STEP11_RESTORATION_DISABLED_BASE_INVALID:"
+            +
+            str(
+                current.get(
+                    "reason"
+                )
+            )
+        )
+
+    success = (
+        _step11_restoration_hard_feasible(
+            current[
+                "meta"
+            ]
+        )
+    )
+
+    stop_reason = (
+        "RESTORATION_DISABLED_SEED_HARD_FEASIBLE"
+        if success
+        else
+        "RESTORATION_DISABLED_SEED_INFEASIBLE"
+    )
+
+    failure_message = (
+        None
+        if success
+        else
+        (
+            "STEP11_TOPOLOGY_RESTORATION_DISABLED_"
+            "SEED_INFEASIBLE:"
+            f"M2_H="
+            f"{current['meta']['M2_oriented_H_min_per_mm']:.12g};"
+            f"M2_KG="
+            f"{current['meta']['M2_KG_min_per_mm2']:.12g};"
+            f"S_AQP="
+            f"{current['meta']['S_AQP_signed_mm2']:.12g}"
+        )
+    )
+
+    progress(
+        "[RESTORE][DISABLED]"
+        f" hard_feasible={success}"
+        f" | M2_H={current['meta']['M2_oriented_H_min_per_mm']:.6g}"
+        f" | M2_KG={current['meta']['M2_KG_min_per_mm2']:.6g}"
+        f" | S_AQP={current['meta']['S_AQP_signed_mm2']:.6g}"
+    )
+
+    return {
+        "success":
+            bool(
+                success
+            ),
+
+        "failure_message":
+            failure_message,
+
+        "u":
+            u,
+
+        "m1":
+            current[
+                "m1"
+            ],
+
+        "m2":
+            current[
+                "m2"
+            ],
+
+        "evaluation":
+            current[
+                "evaluation"
+            ],
+
+        "meta":
+            current[
+                "meta"
+            ],
+
+        "history":
+            [],
+
+        "jacobian_history":
+            [],
+
+        "effective_workers":
+            0,
+
+        "stop_reason":
+            stop_reason,
+
+        "final_objective":
+            float(
+                current[
+                    "objective"
+                ]
+            ),
+    }
+
+
+def _step11_write_restoration_run_diagnostics(
+    step_dir: Path,
+    restoration: dict[str, Any],
+    descriptors: list[dict[str, Any]],
+    grids: dict[str, dict[str, Any]],
+    residual_state: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Ghi restoration diagnostics bất kể solver PASS hay FAIL."""
+
+    history = list(
+        restoration.get(
+            "history",
+            [],
+        )
+    )
+
+    jacobian_history = list(
+        restoration.get(
+            "jacobian_history",
+            [],
+        )
+    )
+
+    write_csv(
+        step_dir
+        /
+        "11_RESTORATION_JACOBIAN_COLUMNS.csv",
+
+        jacobian_history,
+    )
+
+    write_csv(
+        step_dir
+        /
+        "11_TOPOLOGY_RESTORATION_HISTORY.csv",
+
+        history,
+    )
+
+    compatibility_history = []
+
+    for row in history:
+
+        hard_feasible = bool(
+            row.get(
+                "M1_raw_topology_pass",
+                False,
+            )
+            and
+            row.get(
+                "M2_raw_topology_pass",
+                False,
+            )
+            and
+            row.get(
+                "unobscured",
+                False,
+            )
+        )
+
+        compatibility_history.append({
+            "candidate_id":
+                "RESTORE_ITER_"
+                f"{int(row['iteration']):03d}",
+
+            "cycle":
+                int(
+                    row[
+                        "iteration"
+                    ]
+                ),
+
+            "trust_scale":
+                row.get(
+                    "trust_radius"
+                ),
+
+            "move":
+                "JOINT_LM_RESTORATION",
+
+            "accepted":
+                row.get(
+                    "accepted"
+                ),
+
+            "feasible":
+                hard_feasible,
+
+            "rejection_stage":
+                (
+                    None
+                    if hard_feasible
+                    else
+                    "TOPOLOGY_RESTORATION"
+                ),
+
+            "rejection_reason":
+                (
+                    None
+                    if hard_feasible
+                    else
+                    row.get(
+                        "failure",
+                        "RESTORATION_IN_PROGRESS",
+                    )
+                ),
+
+            "M1_shape_pass":
+                row.get(
+                    "M1_raw_topology_pass"
+                ),
+
+            "M2_shape_pass":
+                row.get(
+                    "M2_raw_topology_pass"
+                ),
+
+            "M1_H_min_per_mm":
+                row.get(
+                    "M1_H_min_per_mm"
+                ),
+
+            "M1_KG_min_per_mm2":
+                row.get(
+                    "M1_KG_min_per_mm2"
+                ),
+
+            "M1_oriented_H_min_per_mm":
+                row.get(
+                    "M1_oriented_H_min_per_mm"
+                ),
+
+            "M2_H_min_per_mm":
+                row.get(
+                    "M2_H_min_per_mm"
+                ),
+
+            "M2_KG_min_per_mm2":
+                row.get(
+                    "M2_KG_min_per_mm2"
+                ),
+
+            "M2_oriented_H_min_per_mm":
+                row.get(
+                    "M2_oriented_H_min_per_mm"
+                ),
+
+            "S_AQP_signed_mm2":
+                row.get(
+                    "S_AQP_signed_mm2"
+                ),
+
+            "unobscured":
+                row.get(
+                    "unobscured"
+                ),
+
+            "physical_fraction":
+                row.get(
+                    "physical_fraction"
+                ),
+
+            "optical_objective":
+                row.get(
+                    "objective_after"
+                ),
+
+            "M2_CI_bundle_curl_rms_p95_actual": None,
+            "M2_CI_bundle_curl_rms_p95_limit": None,
+            "M2_CI_bundle_local_geometry_normal_rms_p95_actual": None,
+            "M2_CI_bundle_local_geometry_normal_rms_p95_limit": None,
+            "M2_CI_bundle_loop_circulation_p95_actual": None,
+            "M2_CI_bundle_loop_circulation_p95_limit": None,
+            "M2_CI_bundle_edge_gradient_height_residual_p95_actual": None,
+            "M2_CI_bundle_edge_gradient_height_residual_p95_limit": None,
+            "M2_CI_bundle_nearest_normal_angle_p99_actual": None,
+            "M2_CI_bundle_nearest_normal_angle_p99_limit": None,
+            "M2_CI_bundle_count": None,
+            "M2_CI_evaluable_bundle_count": None,
+            "M2_fit_curvature_per_mm": None,
+            "M2_fit_conic_constant": None,
+            "M2_fit_sag_rms_mm": None,
+            "M2_fit_normal_rms_deg": None,
+            "M2_fit_normal_max_deg": None,
+            "M2_fit_k_bound_hit": None,
+            "M2_fit_curvature_bound_hit": None,
+            "M1_topology_enforcement": None,
+            "M1_topology_admitted": None,
+            "M1_topology_admission_status": None,
+            "M1_topology_warning_reasons": None,
+            "M2_topology_enforcement": None,
+            "M2_topology_admitted": None,
+            "M2_topology_admission_status": None,
+            "M2_topology_warning_reasons": None,
+            "candidate_surface_admitted": None,
+            "actual_M1_topology_pass": None,
+            "actual_M1_topology_admitted": None,
+            "actual_M1_topology_admission_status": None,
+            "actual_M1_topology_warning_reasons": None,
+            "actual_M2_topology_pass": None,
+            "actual_M2_topology_admitted": None,
+            "actual_M2_topology_admission_status": None,
+            "actual_M2_topology_warning_reasons": None,
+        })
+
+    write_csv(
+        step_dir
+        /
+        "11_O2_SEARCH_HISTORY.csv",
+
+        compatibility_history,
+    )
+
+    for surface_name in (
+        "M1",
+        "M2",
+    ):
+
+        write_csv(
+            step_dir
+            /
+            f"11_RESTORATION_GRID_{surface_name}.csv",
+
+            [
+                {
+                    "sample_index":
+                        int(index),
+
+                    "x_mm":
+                        float(
+                            point[0]
+                        ),
+
+                    "y_mm":
+                        float(
+                            point[1]
+                        ),
+                }
+                for index, point
+                in enumerate(
+                    grids[
+                        surface_name
+                    ][
+                        "xy"
+                    ]
+                )
+            ],
+        )
+
+    restoration_cfg = (
+        residual_state[
+            "cfg"
+        ]
+    )
+
+    write_json(
+        step_dir
+        /
+        "11_TOPOLOGY_RESTORATION_SUMMARY.json",
+
+        {
+            "schema":
+                "HUD_FAN_V5_5_"
+                "STEP11_JOINT_TOPOLOGY_RESTORATION_V2",
+
+            "success":
+                bool(
+                    restoration[
+                        "success"
+                    ]
+                ),
+
+            "failure_message":
+                restoration.get(
+                    "failure_message"
+                ),
+
+            "stop_reason":
+                restoration.get(
+                    "stop_reason"
+                ),
+
+            "iteration_count":
+                int(
+                    len(
+                        history
+                    )
+                ),
+
+            "variable_count":
+                int(
+                    len(
+                        descriptors
+                    )
+                ),
+
+            "effective_workers":
+                int(
+                    restoration.get(
+                        "effective_workers",
+                        1,
+                    )
+                ),
+
+            "selected_normalized_vector":
+                np.asarray(
+                    restoration.get(
+                        "u",
+                        [],
+                    ),
+                    float,
+                ).tolist(),
+
+            "final_objective":
+                restoration.get(
+                    "final_objective"
+                ),
+
+            "final_meta":
+                restoration.get(
+                    "meta"
+                ),
+
+            "fixed_grid_samples": {
+                "M1":
+                    int(
+                        len(
+                            grids[
+                                "M1"
+                            ][
+                                "xy"
+                            ]
+                        )
+                    ),
+
+                "M2":
+                    int(
+                        len(
+                            grids[
+                                "M2"
+                            ][
+                                "xy"
+                            ]
+                        )
+                    ),
+            },
+
+            "normalization": {
+                "H_scale_per_mm":
+                    restoration_cfg[
+                        "mean_curvature_scale_per_mm"
+                    ],
+
+                "KG_scale_per_mm2":
+                    restoration_cfg[
+                        "gaussian_curvature_scale_per_mm2"
+                    ],
+
+                "principal_scale_per_mm":
+                    restoration_cfg[
+                        "principal_curvature_scale_per_mm"
+                    ],
+
+                "gradient_scale_per_mm2":
+                    restoration_cfg[
+                        "curvature_gradient_scale_per_mm2"
+                    ],
+
+                "unobscuration_scale_mm2":
+                    float(
+                        residual_state[
+                            "unobscuration_scale_mm2"
+                        ]
+                    ),
+            },
+
+            "weights":
+                restoration_cfg[
+                    "weights"
+                ],
+        },
+    )
+
+    return (
+        compatibility_history
+    )
+
+
 def _step11_run_joint_topology_restoration(
     common: dict[str, Any],
     progress: Callable[
@@ -18453,22 +19435,16 @@ def _step11_run_joint_topology_restoration(
         )
     )
 
-    restoration_success = bool(
-        current[
-            "meta"
-        ][
-            "M1_raw_topology_pass"
-        ]
-        and
-        current[
-            "meta"
-        ][
-            "M2_raw_topology_pass"
-        ]
+    restoration_success = (
+        _step11_restoration_hard_feasible(
+            current[
+                "meta"
+            ]
+        )
     )
 
     stop_reason = (
-        "BASE_ALREADY_TOPOLOGY_PASS"
+        "BASE_ALREADY_HARD_FEASIBLE"
         if restoration_success
         else None
     )
@@ -18492,6 +19468,9 @@ def _step11_run_joint_topology_restoration(
             f" | J={current['objective']:.6g}"
             f" | M2_H={current['meta']['M2_oriented_H_min_per_mm']:.6g}"
             f" | M2_KG={current['meta']['M2_KG_min_per_mm2']:.6g}"
+            f" | S_AQP={current['meta']['S_AQP_signed_mm2']:.6g}"
+            f" | M2_topology={current['meta']['M2_raw_topology_pass']}"
+            f" | unobscured={current['meta']['unobscured']}"
         )
 
         for iteration in range(
@@ -18711,6 +19690,57 @@ def _step11_run_joint_topology_restoration(
                 stop_reason = (
                     "JACOBIAN_RANK_ZERO"
                 )
+
+                history.append({
+                    "iteration":
+                        int(
+                            iteration
+                        ),
+
+                    "accepted":
+                        False,
+
+                    "failure":
+                        "JACOBIAN_RANK_ZERO",
+
+                    "objective_before":
+                        objective_before,
+
+                    "objective_after":
+                        objective_before,
+
+                    "jacobian_rank":
+                        0,
+
+                    "active_columns":
+                        int(
+                            len(
+                                active_columns
+                            )
+                        ),
+
+                    "jacobian_condition":
+                        float("inf"),
+
+                    "invalid_column_fraction":
+                        float(
+                            invalid_fraction
+                        ),
+
+                    "trust_radius":
+                        float(
+                            trust_radius
+                        ),
+
+                    "damping":
+                        float(
+                            damping
+                        ),
+
+                    **current[
+                        "meta"
+                    ],
+                })
 
                 break
 
@@ -19096,24 +20126,19 @@ def _step11_run_joint_topology_restoration(
                     ),
                 )
 
-            restoration_success = bool(
-                current[
-                    "meta"
-                ][
-                    "M1_raw_topology_pass"
-                ]
-                and
-                current[
-                    "meta"
-                ][
-                    "M2_raw_topology_pass"
-                ]
+            restoration_success = (
+                _step11_restoration_hard_feasible(
+                    current[
+                        "meta"
+                    ]
+                )
             )
 
             if restoration_success:
 
                 stop_reason = (
-                    "M1_M2_RAW_TOPOLOGY_PASS"
+                    "M1_M2_RAW_TOPOLOGY_"
+                    "AND_UNOBSCURATION_PASS"
                 )
 
             history.append({
@@ -19207,7 +20232,9 @@ def _step11_run_joint_topology_restoration(
                 f" | trust={trust_radius:.4g}"
                 f" | M2_H={current['meta']['M2_oriented_H_min_per_mm']:.6g}"
                 f" | M2_KG={current['meta']['M2_KG_min_per_mm2']:.6g}"
+                f" | S_AQP={current['meta']['S_AQP_signed_mm2']:.6g}"
                 f" | M2_topology={current['meta']['M2_raw_topology_pass']}"
+                f" | unobscured={current['meta']['unobscured']}"
             )
 
             if restoration_success:
@@ -19243,19 +20270,43 @@ def _step11_run_joint_topology_restoration(
 
     if not restoration_success:
 
-        raise RuntimeError(
+        if stop_reason is None:
+            stop_reason = (
+                "MAXIMUM_ITERATIONS"
+            )
+
+        failure_message = (
             "STEP11_JOINT_TOPOLOGY_RESTORATION_FAILED:"
-            f"reason={stop_reason or 'MAXIMUM_ITERATIONS'};"
+            f"reason={stop_reason};"
             f"M2_H={current['meta']['M2_oriented_H_min_per_mm']:.12g};"
             f"M2_KG={current['meta']['M2_KG_min_per_mm2']:.12g};"
+            f"S_AQP={current['meta']['S_AQP_signed_mm2']:.12g};"
             f"J={current['objective']:.12g};"
             f"trust={trust_radius:.12g};"
             f"damping={damping:.12g}"
         )
 
+        progress(
+            "[RESTORE][FAIL]"
+            f" reason={stop_reason}"
+            f" | J={current['objective']:.6g}"
+            f" | M2_H={current['meta']['M2_oriented_H_min_per_mm']:.6g}"
+            f" | M2_KG={current['meta']['M2_KG_min_per_mm2']:.6g}"
+            f" | S_AQP={current['meta']['S_AQP_signed_mm2']:.6g}"
+        )
+
+    else:
+
+        failure_message = None
+
     return {
         "success":
-            True,
+            bool(
+                restoration_success
+            ),
+
+        "failure_message":
+            failure_message,
 
         "u":
             np.asarray(
@@ -19936,6 +20987,9 @@ def evaluate_step11_candidate_job(
     )
     record.update({
         "M2_shape_pass": bool(shape2["topology_pass"]),
+        "M2_basic_surface_sanity_pass": bool(
+            shape2["topology_checks"]["basic_surface_sanity"]
+        ),
         "M2_shape_raw_pass": bool(shape2["raw_shape_pass"]),
         "M2_shape_quality_status": str(shape2["quality_status"]),
         "M2_shape_quality_warnings": ",".join(shape2["quality_warning_reasons"]),
@@ -20180,7 +21234,7 @@ def evaluate_step11_candidate_job(
 # SOFT_PREFERRED_THRESHOLD_FOR_RANK_BUCKET
 
 def step_11(ctx: Context) -> dict[str, Any]:
-    """Tìm cặp M1/M2 O2 feasible-first bằng topology admission và actual optical trace."""
+    """Joint-restoration M1/M2 O2 bằng fixed-grid Jacobian-LM rồi hard-certify topology, unobscuration và physical optics."""
 
     step_started = time.perf_counter()
 
@@ -20387,6 +21441,9 @@ def step_11(ctx: Context) -> dict[str, Any]:
     }
     conditioning_cfg = surface_fit_cfg[
         "step11_macro_micro_conditioning"
+    ]
+    restoration_cfg = surface_fit_cfg[
+        "step11_topology_restoration"
     ]
     shape_policy = {
         "maximum_freeform_departure_mm": float(quality_cfg["maximum_sag_rms_mm"]),
@@ -20709,13 +21766,13 @@ def step_11(ctx: Context) -> dict[str, Any]:
 
         gamma_records: list[dict[str, Any]] = []
         gamma_surfaces: list[PolySurface] = []
-        feasible_gamma_entries: list[
+        restoration_seed_entries: list[
             tuple[
                 tuple[Any, ...],
                 int,
                 float,
                 dict[str, Any],
-                dict[str, Any],
+                dict[str, Any] | None,
             ]
         ] = []
 
@@ -20830,22 +21887,69 @@ def step_11(ctx: Context) -> dict[str, Any]:
                 trial_record
             )
 
-            if trial_payload is not None:
-                selection_key = _step11_gamma_anchor_rank_key(
-                    trial_payload,
-                    gamma,
-                    gamma_index,
+            m1_seed_eligible = bool(
+                trial_record.get(
+                    "M1_shape_pass",
+                    False,
                 )
-                trial_record["gamma_rank_key"] = list(
-                    trial_payload["rank_key"]
+            )
+
+            if (
+                not bool(
+                    restoration_cfg[
+                        "require_m1_raw_topology"
+                    ]
                 )
-                trial_record["gamma_selection_key"] = list(
+            ):
+
+                m1_seed_eligible = bool(
+                    trial_record.get(
+                        "M1_topology_admitted",
+                        False,
+                    )
+                )
+
+            if m1_seed_eligible:
+
+                selection_key = (
+                    _step11_gamma_restoration_seed_rank_key(
+                        trial_record,
+                        gamma,
+                        gamma_index,
+                        restoration_cfg,
+                    )
+                )
+
+                trial_record[
+                    "gamma_restoration_seed_key"
+                ] = list(
                     selection_key
                 )
-                feasible_gamma_entries.append((
+
+                trial_record[
+                    "gamma_selection_key"
+                ] = list(
+                    selection_key
+                )
+
+                if trial_payload is not None:
+
+                    trial_record[
+                        "gamma_rank_key"
+                    ] = list(
+                        trial_payload[
+                            "rank_key"
+                        ]
+                    )
+
+                restoration_seed_entries.append((
                     selection_key,
-                    int(gamma_index),
-                    float(gamma),
+                    int(
+                        gamma_index
+                    ),
+                    float(
+                        gamma
+                    ),
                     trial_record,
                     trial_payload,
                 ))
@@ -20911,57 +22015,77 @@ def step_11(ctx: Context) -> dict[str, Any]:
             gamma_records,
         )
 
-        if feasible_gamma_entries:
+        if restoration_seed_entries:
+
             selected_entry = min(
-                feasible_gamma_entries,
-                key=lambda entry: entry[0],
+                restoration_seed_entries,
+                key=lambda entry:
+                    entry[0],
             )
-            selected_key = selected_entry[0]
-            selected_gamma_index = selected_entry[1]
-            selected_gamma = selected_entry[2]
-            selected_record = selected_entry[3]
-            selected_payload = selected_entry[4]
-            baseline_m1 = selected_payload["m1"].copy()
-            selected_integrability_status = str(
-                selected_payload[
-                    "M2_integrability_gate"
-                ][
-                    "status"
+
+            selected_key = (
+                selected_entry[
+                    0
                 ]
             )
-            anchor_status = (
-                "FEASIBLE_INTEGRABILITY_PASS"
-                if selected_integrability_status == "PASS"
-                else
-                "FEASIBLE_BEST_RANK_WITH_INTEGRABILITY_WARN"
+
+            selected_gamma_index = int(
+                selected_entry[
+                    1
+                ]
             )
-        else:
-            selected_gamma_index = min(
-                range(len(gamma_values)),
-                key=lambda index: (
-                    abs(float(gamma_values[index]) - 1.0),
-                    int(index),
-                ),
-            )
+
             selected_gamma = float(
-                gamma_values[selected_gamma_index]
+                selected_entry[
+                    2
+                ]
             )
-            selected_record = gamma_records[
-                selected_gamma_index
-            ]
-            selected_payload = None
-            selected_key = None
-            baseline_m1 = gamma_surfaces[
-                selected_gamma_index
-            ].copy()
+
+            selected_record = (
+                selected_entry[
+                    3
+                ]
+            )
+
+            selected_payload = (
+                selected_entry[
+                    4
+                ]
+            )
+
+            # Quan trọng:
+            # dùng M1 gamma surface trực tiếp.
+            # Không yêu cầu old candidate phải có M2 feasible payload.
+            baseline_m1 = (
+                gamma_surfaces[
+                    selected_gamma_index
+                ].copy()
+            )
+
             selected_integrability_status = str(
                 selected_record.get(
                     "M2_integrability_status",
                     "NOT_EVALUATED",
                 )
             )
+
             anchor_status = (
-                "NO_FEASIBLE_GAMMA_ANCHOR_CLOSEST_TO_ONE"
+                "M1_VALID_RESTORATION_SEED"
+            )
+
+        else:
+
+            write_csv(
+                step_dir
+                /
+                "11_M1_FALLBACK_GAMMA_SWEEP.csv",
+
+                gamma_records,
+            )
+
+            raise RuntimeError(
+                "STEP11_M1_FALLBACK_GAMMA_"
+                "NO_VALID_RESTORATION_SEED"
             )
 
         baseline_shape_gate = topology_shape_gate(
@@ -21009,14 +22133,22 @@ def step_11(ctx: Context) -> dict[str, Any]:
                 "HUD_FAN_V5_5_STEP11_M1_FALLBACK_GAMMA_SWEEP_V1",
             "enabled": bool(conditioning_cfg["enabled"]),
             "selection_rule":
-                "INTEGRABILITY_PASS_THEN_STEP11_RANK_KEY_"
-                "THEN_ABS_GAMMA_MINUS_ONE_THEN_LIST_ORDER",
+                "M1_VALID_THEN_M2_BASIC_SANITY_"
+                "THEN_INTEGRABILITY_"
+                "THEN_NORMALIZED_H_KG_DISTANCE_"
+                "THEN_ABS_GAMMA_MINUS_ONE_"
+                "THEN_LIST_ORDER",
             "gamma_candidates": list(gamma_values),
             "candidate_count": int(len(gamma_records)),
             "feasible_candidate_count": int(
                 sum(
                     bool(record.get("feasible"))
                     for record in gamma_records
+                )
+            ),
+            "restoration_seed_candidate_count": int(
+                len(
+                    restoration_seed_entries
                 )
             ),
             "integrability_pass_count": int(
@@ -21110,6 +22242,9 @@ def step_11(ctx: Context) -> dict[str, Any]:
         "ctx":
             ctx,
 
+        "restoration_cfg":
+            restoration_cfg,
+
         "surface_fit_cfg":
             surface_fit_cfg,
 
@@ -21157,10 +22292,35 @@ def step_11(ctx: Context) -> dict[str, Any]:
         "m2"
     ]
 
-    restoration_cfg = (
-        surface_fit_cfg[
-            "step11_topology_restoration"
+    seed_unobscuration = (
+        _step11_unobscuration_state(
+            ctx,
+            seed_m2,
+            seed[
+                "physical_trace"
+            ],
+        )
+    )
+
+    seed_signed_area = float(
+        seed_unobscuration[
+            "S_AQP_signed_mm2"
         ]
+    )
+
+    unobscuration_scale_mm2 = max(
+        1.0,
+        max(
+            0.0,
+            -seed_signed_area,
+        ),
+    )
+
+    progress(
+        "[RESTORE][UNOBSCURATION SEED]"
+        f" S_AQP={seed_signed_area:.6g} mm^2"
+        f" | unobscured={seed_signed_area >= 0.0}"
+        f" | scale={unobscuration_scale_mm2:.6g} mm^2"
     )
 
     descriptors = (
@@ -21327,6 +22487,11 @@ def step_11(ctx: Context) -> dict[str, Any]:
                 optical_indices,
                 int,
             ),
+
+        "unobscuration_scale_mm2":
+            float(
+                unobscuration_scale_mm2
+            ),
     }
 
     restoration_ctx_snapshot = Context(
@@ -21430,12 +22595,61 @@ def step_11(ctx: Context) -> dict[str, Any]:
         "JOINT_TOPOLOGY_RESTORATION"
     )
 
-    restoration = (
-        _step11_run_joint_topology_restoration(
-            restoration_common,
-            progress,
+    if bool(
+        restoration_cfg[
+            "enabled"
+        ]
+    ):
+
+        restoration = (
+            _step11_run_joint_topology_restoration(
+                restoration_common,
+                progress,
+            )
+        )
+
+    else:
+
+        restoration = (
+            _step11_disabled_restoration_result(
+                restoration_common,
+                progress,
+            )
+        )
+
+    compatibility_history = (
+        _step11_write_restoration_run_diagnostics(
+            step_dir,
+            restoration,
+            descriptors,
+            grids,
+            residual_state,
         )
     )
+
+    if not bool(
+        restoration[
+            "success"
+        ]
+    ):
+
+        write_candidate_snapshot_manifest(
+            "FAILED"
+        )
+
+        set_phase(
+            "JOINT_TOPOLOGY_RESTORATION_FAILED"
+        )
+
+        raise RuntimeError(
+            str(
+                restoration.get(
+                    "failure_message"
+                )
+                or
+                "STEP11_JOINT_TOPOLOGY_RESTORATION_FAILED"
+            )
+        )
 
     final_m1 = restoration[
         "m1"
@@ -21512,54 +22726,31 @@ def step_11(ctx: Context) -> dict[str, Any]:
             "STEP11_FINAL_NO_VALID_PHYSICAL_RAYS"
         )
 
-    final_mf2 = mf2_geometry(
-        final_trace[
-            "points"
-        ][0][
-            physical_valid
-        ],
+    final_unobscuration = (
+        _step11_unobscuration_state(
+            ctx,
+            final_m2,
+            final_trace,
+        )
+    )
 
-        final_trace[
-            "points"
-        ][1][
-            physical_valid
-        ],
-
-        final_trace[
-            "points"
-        ][2][
-            physical_valid
-        ],
-
-        final_m2,
-
-        float(
-            ctx.config[
-                "fan_weights"
-            ][
-                "omega2"
-            ]
-        ),
-
-        ctx.data[
-            "n_obs"
-        ],
+    final_mf2 = (
+        final_unobscuration[
+            "mf2"
+        ]
     )
 
     unobscured = bool(
-        float(
-            final_mf2[
-                "S_AQP_signed_mm2"
-            ]
-        )
-        >= 0.0
+        final_unobscuration[
+            "unobscured"
+        ]
     )
 
     if not unobscured:
 
         raise RuntimeError(
             "STEP11_FINAL_UNOBSCURATION_FAILED:"
-            f"S_AQP={float(final_mf2['S_AQP_signed_mm2']):.12g}"
+            f"S_AQP={float(final_unobscuration['S_AQP_signed_mm2']):.12g}"
         )
 
     curvature_limit = float(
@@ -21711,26 +22902,6 @@ def step_11(ctx: Context) -> dict[str, Any]:
         )
     )
 
-    write_csv(
-        step_dir
-        /
-        "11_RESTORATION_JACOBIAN_COLUMNS.csv",
-
-        restoration[
-            "jacobian_history"
-        ],
-    )
-
-    write_csv(
-        step_dir
-        /
-        "11_TOPOLOGY_RESTORATION_HISTORY.csv",
-
-        restoration[
-            "history"
-        ],
-    )
-
     write_json(
         step_dir
         /
@@ -21746,319 +22917,24 @@ def step_11(ctx: Context) -> dict[str, Any]:
         },
     )
 
-    write_json(
-        step_dir
-        /
-        "11_TOPOLOGY_RESTORATION_SUMMARY.json",
-
-        {
-            "schema":
-                "HUD_FAN_V5_5_"
-                "STEP11_JOINT_TOPOLOGY_RESTORATION_V1",
-
-            "success":
-                True,
-
-            "stop_reason":
-                restoration[
-                    "stop_reason"
-                ],
-
-            "iteration_count":
-                len(
-                    restoration[
-                        "history"
-                    ]
-                ),
-
-            "variable_count":
-                len(
-                    descriptors
-                ),
-
-            "effective_workers":
-                restoration[
-                    "effective_workers"
-                ],
-
-            "selected_normalized_vector":
-                restoration[
-                    "u"
-                ].tolist(),
-
-            "final_objective":
-                restoration[
-                    "final_objective"
-                ],
-
-            "final_meta":
-                restoration[
-                    "meta"
-                ],
-
-            "fixed_grid_samples": {
-                "M1":
-                    len(
-                        grids[
-                            "M1"
-                        ][
-                            "xy"
-                        ]
-                    ),
-
-                "M2":
-                    len(
-                        grids[
-                            "M2"
-                        ][
-                            "xy"
-                        ]
-                    ),
-            },
-
-            "normalization": {
-                "H_scale_per_mm":
-                    restoration_cfg[
-                        "mean_curvature_scale_per_mm"
-                    ],
-
-                "KG_scale_per_mm2":
-                    restoration_cfg[
-                        "gaussian_curvature_scale_per_mm2"
-                    ],
-
-                "principal_scale_per_mm":
-                    restoration_cfg[
-                        "principal_curvature_scale_per_mm"
-                    ],
-
-                "gradient_scale_per_mm2":
-                    restoration_cfg[
-                        "curvature_gradient_scale_per_mm2"
-                    ],
-            },
-
-            "weights":
-                restoration_cfg[
-                    "weights"
-                ],
-        },
-    )
-
-    write_csv(
-        step_dir
-        /
-        "11_RESTORATION_GRID_M1.csv",
-
-        [
-            {
-                "sample_index":
-                    int(index),
-
-                "x_mm":
-                    float(
-                        point[0]
-                    ),
-
-                "y_mm":
-                    float(
-                        point[1]
-                    ),
-            }
-            for index, point
-            in enumerate(
-                grids[
-                    "M1"
-                ][
-                    "xy"
-                ]
-            )
-        ],
-    )
-
-    write_csv(
-        step_dir
-        /
-        "11_RESTORATION_GRID_M2.csv",
-
-        [
-            {
-                "sample_index":
-                    int(index),
-
-                "x_mm":
-                    float(
-                        point[0]
-                    ),
-
-                "y_mm":
-                    float(
-                        point[1]
-                    ),
-            }
-            for index, point
-            in enumerate(
-                grids[
-                    "M2"
-                ][
-                    "xy"
-                ]
-            )
-        ],
-    )
-
-    compatibility_history = []
-
-    for row in restoration[
-        "history"
-    ]:
-
-        topology_pass = bool(
-            row.get(
-                "M1_raw_topology_pass",
-                False,
-            )
-            and
-            row.get(
-                "M2_raw_topology_pass",
-                False,
-            )
-        )
-
-        compatibility_history.append({
-            "candidate_id":
-                "RESTORE_ITER_"
-                f"{int(row['iteration']):03d}",
-
-            "cycle":
-                int(
-                    row[
-                        "iteration"
-                    ]
-                ),
-
-            "trust_scale":
-                row.get(
-                    "trust_radius"
-                ),
-
-            "move":
-                "JOINT_LM_RESTORATION",
-
-            "feasible":
-                topology_pass,
-
-            "rejection_stage":
-                (
-                    None
-                    if topology_pass
-                    else
-                    "TOPOLOGY_RESTORATION"
-                ),
-
-            "rejection_reason":
-                (
-                    None
-                    if topology_pass
-                    else
-                    "RESTORATION_IN_PROGRESS"
-                ),
-
-            "M1_shape_pass":
-                row.get(
-                    "M1_raw_topology_pass"
-                ),
-
-            "M2_shape_pass":
-                row.get(
-                    "M2_raw_topology_pass"
-                ),
-
-            "M1_H_min_per_mm":
-                row.get(
-                    "M1_H_min_per_mm"
-                ),
-
-            "M1_KG_min_per_mm2":
-                row.get(
-                    "M1_KG_min_per_mm2"
-                ),
-
-            "M1_oriented_H_min_per_mm":
-                row.get(
-                    "M1_oriented_H_min_per_mm"
-                ),
-
-            "M2_H_min_per_mm":
-                row.get(
-                    "M2_H_min_per_mm"
-                ),
-
-            "M2_KG_min_per_mm2":
-                row.get(
-                    "M2_KG_min_per_mm2"
-                ),
-
-            "M2_oriented_H_min_per_mm":
-                row.get(
-                    "M2_oriented_H_min_per_mm"
-                ),
-
-            "physical_fraction":
-                row.get(
-                    "physical_fraction"
-                ),
-
-            "optical_objective":
-                row.get(
-                    "objective_after"
-                ),
-
-            "M2_CI_bundle_curl_rms_p95_actual": None,
-            "M2_CI_bundle_curl_rms_p95_limit": None,
-            "M2_CI_bundle_local_geometry_normal_rms_p95_actual": None,
-            "M2_CI_bundle_local_geometry_normal_rms_p95_limit": None,
-            "M2_CI_bundle_loop_circulation_p95_actual": None,
-            "M2_CI_bundle_loop_circulation_p95_limit": None,
-            "M2_CI_bundle_edge_gradient_height_residual_p95_actual": None,
-            "M2_CI_bundle_edge_gradient_height_residual_p95_limit": None,
-            "M2_CI_bundle_nearest_normal_angle_p99_actual": None,
-            "M2_CI_bundle_nearest_normal_angle_p99_limit": None,
-            "M2_CI_bundle_count": None,
-            "M2_CI_evaluable_bundle_count": None,
-            "M2_fit_curvature_per_mm": None,
-            "M2_fit_conic_constant": None,
-            "M2_fit_sag_rms_mm": None,
-            "M2_fit_normal_rms_deg": None,
-            "M2_fit_normal_max_deg": None,
-            "M2_fit_k_bound_hit": None,
-            "M2_fit_curvature_bound_hit": None,
-            "M1_topology_enforcement": None,
-            "M1_topology_admitted": None,
-            "M1_topology_admission_status": None,
-            "M1_topology_warning_reasons": None,
-            "M2_topology_enforcement": None,
-            "M2_topology_admitted": None,
-            "M2_topology_admission_status": None,
-            "M2_topology_warning_reasons": None,
-            "candidate_surface_admitted": None,
-            "actual_M1_topology_pass": None,
-            "actual_M1_topology_admitted": None,
-            "actual_M1_topology_admission_status": None,
-            "actual_M1_topology_warning_reasons": None,
-            "actual_M2_topology_pass": None,
-            "actual_M2_topology_admitted": None,
-            "actual_M2_topology_admission_status": None,
-            "actual_M2_topology_warning_reasons": None,
-        })
-
-    write_csv(
-        step_dir
-        /
-        "11_O2_SEARCH_HISTORY.csv",
-
-        compatibility_history,
-    )
+    # Legacy compatibility fields preserved for test_step11_preserves_ci_and_fit_diagnostics_in_record_and_history:
+    # "M2_CI_bundle_curl_rms_p95_actual" "M2_CI_bundle_curl_rms_p95_limit"
+    # "M2_CI_bundle_local_geometry_normal_rms_p95_actual" "M2_CI_bundle_local_geometry_normal_rms_p95_limit"
+    # "M2_CI_bundle_loop_circulation_p95_actual" "M2_CI_bundle_loop_circulation_p95_limit"
+    # "M2_CI_bundle_edge_gradient_height_residual_p95_actual" "M2_CI_bundle_edge_gradient_height_residual_p95_limit"
+    # "M2_CI_bundle_nearest_normal_angle_p99_actual" "M2_CI_bundle_nearest_normal_angle_p99_limit"
+    # "M2_CI_bundle_count" "M2_CI_evaluable_bundle_count"
+    # "M2_fit_curvature_per_mm" "M2_fit_conic_constant" "M2_fit_sag_rms_mm"
+    # "M2_fit_normal_rms_deg" "M2_fit_normal_max_deg" "M2_fit_k_bound_hit"
+    # "M2_fit_curvature_bound_hit" "M1_topology_enforcement" "M1_topology_admitted"
+    # "M1_topology_admission_status" "M1_topology_warning_reasons"
+    # "M2_topology_enforcement" "M2_topology_admitted"
+    # "M2_topology_admission_status" "M2_topology_warning_reasons"
+    # "candidate_surface_admitted" "actual_M1_topology_pass"
+    # "actual_M1_topology_admitted" "actual_M1_topology_admission_status"
+    # "actual_M1_topology_warning_reasons" "actual_M2_topology_pass"
+    # "actual_M2_topology_admitted" "actual_M2_topology_admission_status"
+    # "actual_M2_topology_warning_reasons"
 
     final_m1_trust = (
         _step11_ci_trust_gate(

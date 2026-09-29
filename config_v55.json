@@ -359,6 +359,7 @@
         "M2_sag_trust": 0.1,
         "M2_normal_trust": 0.1,
         "physical_fraction": 1.0,
+        "unobscuration": 4.0,
         "optical": 0.25
       }
     },
