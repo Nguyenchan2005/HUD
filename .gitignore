@@ -1,0 +1,39 @@
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Pipeline runtime results and generated visualizations
+/multistart_runs_v5_5/
+/EXECUTION/
+/manual_flow_v5_5/
+/render_rollback_backups/
+/resuft/
+/STEP_24/
+/temp_check_rt/
+/scratch/
+/performance_profiles/
+
+# Duplicate/local source snapshots; production source is at repository root
+/CODE/
+/code1/
+
+# Generated reports and manifests
+/EXECUTION_MANIFEST.json
+/DIRECTORY_TREE.txt
+/V5_5_VERIFICATION.json
+/*_VERIFICATION.json
+
+# Archives, logs, and temporary files
+*.zip
+*.log
+*.tmp
+*.temp
+
+# Editor and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
