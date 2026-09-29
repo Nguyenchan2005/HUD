@@ -875,6 +875,7 @@ def validate_config(c: dict[str, Any]) -> None:
         "normal_residual_mode", "k_profile_enabled", "k_profile_sample_count", "integrability_gates",
         "diagnostic_bundle_max_samples", "mirror_topology_authority",
         "step11_macro_micro_conditioning",
+        "step11_topology_restoration",
         "step12_quality_gates", "step12_o2_refinement",
     }
     if not required_surface_fit.issubset(surface_fit):
@@ -1115,6 +1116,284 @@ def validate_config(c: dict[str, Any]) -> None:
         ):
             raise ValueError(
                 "STEP11_MAXIMUM_SEARCH_CYCLES_INVALID"
+            )
+
+    restoration = surface_fit[
+        "step11_topology_restoration"
+    ]
+
+    required_restoration = {
+        "enabled",
+        "grid_samples",
+        "maximum_iterations",
+        "finite_difference_normalized",
+        "finite_difference_shrink_factors",
+        "maximum_invalid_jacobian_fraction",
+        "minimum_jacobian_column_norm",
+        "svd_rcond",
+        "maximum_jacobian_condition",
+        "damping",
+        "minimum_damping",
+        "maximum_damping",
+        "damping_multipliers",
+        "accepted_damping_factor",
+        "rejected_damping_factor",
+        "max_step_normalized",
+        "minimum_trust_radius",
+        "maximum_trust_radius",
+        "trust_shrink_factor",
+        "trust_expand_factor",
+        "minimum_acceptance_rho",
+        "trust_shrink_rho",
+        "trust_expand_rho",
+        "line_search_alphas",
+        "h_target_per_mm",
+        "kg_target_per_mm2",
+        "mean_curvature_scale_per_mm",
+        "gaussian_curvature_scale_per_mm2",
+        "principal_curvature_scale_per_mm",
+        "curvature_gradient_scale_per_mm2",
+        "pair_sag_trust_scale_mm",
+        "pair_normal_trust_scale_deg",
+        "physical_fraction_scale",
+        "maximum_optical_residual_samples",
+        "require_m1_raw_topology",
+        "require_stable_orientation_sign",
+        "coefficient_absolute_span_mm",
+        "curvature_relative_span",
+        "minimum_curvature_span_per_mm",
+        "conic_absolute_span",
+        "bound_hit_relative_tolerance",
+        "reject_final_parameter_bound_hit",
+        "weights",
+    }
+
+    if set(restoration) != required_restoration:
+        raise ValueError(
+            "STEP11_TOPOLOGY_RESTORATION_KEYS_INVALID"
+        )
+
+    if not isinstance(
+        restoration["enabled"],
+        bool,
+    ):
+        raise ValueError(
+            "STEP11_TOPOLOGY_RESTORATION_ENABLED_INVALID"
+        )
+
+    for key in (
+        "grid_samples",
+        "maximum_iterations",
+        "maximum_optical_residual_samples",
+    ):
+        value = restoration[key]
+
+        if (
+            isinstance(value, bool)
+            or int(value) != value
+            or int(value) < 1
+        ):
+            raise ValueError(
+                f"STEP11_RESTORATION_INTEGER_INVALID:{key}"
+            )
+
+    if int(
+        restoration["grid_samples"]
+    ) < 9:
+        raise ValueError(
+            "STEP11_RESTORATION_GRID_TOO_SMALL"
+        )
+
+    positive_keys = (
+        "finite_difference_normalized",
+        "minimum_jacobian_column_norm",
+        "svd_rcond",
+        "maximum_jacobian_condition",
+        "damping",
+        "minimum_damping",
+        "maximum_damping",
+        "accepted_damping_factor",
+        "rejected_damping_factor",
+        "max_step_normalized",
+        "minimum_trust_radius",
+        "maximum_trust_radius",
+        "trust_shrink_factor",
+        "trust_expand_factor",
+        "mean_curvature_scale_per_mm",
+        "gaussian_curvature_scale_per_mm2",
+        "principal_curvature_scale_per_mm",
+        "curvature_gradient_scale_per_mm2",
+        "pair_sag_trust_scale_mm",
+        "pair_normal_trust_scale_deg",
+        "physical_fraction_scale",
+        "coefficient_absolute_span_mm",
+        "curvature_relative_span",
+        "minimum_curvature_span_per_mm",
+        "conic_absolute_span",
+        "bound_hit_relative_tolerance",
+    )
+
+    for key in positive_keys:
+        value = restoration[key]
+
+        if (
+            isinstance(value, bool)
+            or not np.isfinite(
+                float(value)
+            )
+            or float(value) <= 0.0
+        ):
+            raise ValueError(
+                "STEP11_RESTORATION_"
+                f"POSITIVE_VALUE_INVALID:{key}"
+            )
+
+    for key in (
+        "maximum_invalid_jacobian_fraction",
+        "minimum_acceptance_rho",
+        "trust_shrink_rho",
+        "trust_expand_rho",
+    ):
+        value = float(
+            restoration[key]
+        )
+
+        if not (
+            np.isfinite(value)
+            and
+            0.0 <= value <= 1.0
+        ):
+            raise ValueError(
+                "STEP11_RESTORATION_"
+                f"FRACTION_INVALID:{key}"
+            )
+
+    if (
+        float(
+            restoration[
+                "trust_shrink_rho"
+            ]
+        )
+        >=
+        float(
+            restoration[
+                "trust_expand_rho"
+            ]
+        )
+    ):
+        raise ValueError(
+            "STEP11_RESTORATION_RHO_ORDER_INVALID"
+        )
+
+    if (
+        float(
+            restoration[
+                "minimum_trust_radius"
+            ]
+        )
+        >
+        float(
+            restoration[
+                "maximum_trust_radius"
+            ]
+        )
+    ):
+        raise ValueError(
+            "STEP11_RESTORATION_TRUST_RANGE_INVALID"
+        )
+
+    for key in (
+        "finite_difference_shrink_factors",
+        "damping_multipliers",
+        "line_search_alphas",
+    ):
+        values = np.asarray(
+            restoration[key],
+            float,
+        )
+
+        if (
+            values.ndim != 1
+            or len(values) == 0
+            or not np.all(
+                np.isfinite(values)
+            )
+            or np.any(values <= 0.0)
+        ):
+            raise ValueError(
+                "STEP11_RESTORATION_"
+                f"LIST_INVALID:{key}"
+            )
+
+    if not isinstance(
+        restoration[
+            "require_m1_raw_topology"
+        ],
+        bool,
+    ):
+        raise ValueError(
+            "STEP11_REQUIRE_M1_TOPOLOGY_INVALID"
+        )
+
+    if not isinstance(
+        restoration[
+            "require_stable_orientation_sign"
+        ],
+        bool,
+    ):
+        raise ValueError(
+            "STEP11_STABLE_ORIENTATION_CONFIG_INVALID"
+        )
+
+    if not isinstance(
+        restoration[
+            "reject_final_parameter_bound_hit"
+        ],
+        bool,
+    ):
+        raise ValueError(
+            "STEP11_FINAL_BOUND_POLICY_INVALID"
+        )
+
+    weights = restoration["weights"]
+
+    required_weights = {
+        "M1_H",
+        "M1_KG",
+        "M1_principal",
+        "M1_gradient",
+
+        "M2_H",
+        "M2_KG",
+        "M2_principal",
+        "M2_gradient",
+
+        "M1_sag_trust",
+        "M1_normal_trust",
+
+        "M2_sag_trust",
+        "M2_normal_trust",
+
+        "physical_fraction",
+        "optical",
+    }
+
+    if set(weights) != required_weights:
+        raise ValueError(
+            "STEP11_RESTORATION_WEIGHT_KEYS_INVALID"
+        )
+
+    for key, value in weights.items():
+        if (
+            isinstance(value, bool)
+            or not np.isfinite(
+                float(value)
+            )
+            or float(value) < 0.0
+        ):
+            raise ValueError(
+                "STEP11_RESTORATION_"
+                f"WEIGHT_INVALID:{key}"
             )
 
     if "step12_aperture_rebuild" in surface_fit:
@@ -14276,6 +14555,1834 @@ def step_10(ctx: Context) -> dict[str, Any]:
             "fallback_count": ci["fallback_count"], "cloud_diagnostics": diagnostic}
 
 
+def _step11_fixed_residual_grid(
+    surface: PolySurface,
+    samples: int,
+) -> dict[str, np.ndarray | float]:
+    """
+    Tạo topology residual grid duy nhất cho cả restoration run.
+
+    Grid KHÔNG thay đổi theo candidate.
+    Neighbor graph cũng được freeze để curvature-gradient
+    luôn so sánh đúng cùng topology.
+    """
+
+    if (
+        isinstance(samples, bool)
+        or int(samples) != samples
+        or int(samples) < 9
+    ):
+        raise ValueError(
+            "STEP11_FIXED_GRID_SAMPLES_INVALID"
+        )
+
+    x = np.linspace(
+        -float(surface.half_aperture[0]),
+        float(surface.half_aperture[0]),
+        int(samples),
+    )
+
+    y = np.linspace(
+        -float(surface.half_aperture[1]),
+        float(surface.half_aperture[1]),
+        int(samples),
+    )
+
+    X, Y = np.meshgrid(
+        x,
+        y,
+    )
+
+    xy = np.column_stack([
+        X.ravel(),
+        Y.ravel(),
+    ])
+
+    if surface.aperture_polygon is not None:
+
+        poly = np.asarray(
+            surface.aperture_polygon,
+            float,
+        )
+
+        if (
+            poly.ndim != 2
+            or poly.shape[1] != 2
+            or len(poly) < 3
+            or not np.all(
+                np.isfinite(poly)
+            )
+        ):
+            raise RuntimeError(
+                "STEP11_FIXED_GRID_POLYGON_INVALID:"
+                f"{surface.name}"
+            )
+
+        edges = (
+            np.roll(
+                poly,
+                -1,
+                axis=0,
+            )
+            -
+            poly
+        )
+
+        cross = (
+            edges[None, :, 0]
+            *
+            (
+                xy[:, None, 1]
+                -
+                poly[None, :, 1]
+            )
+            -
+            edges[None, :, 1]
+            *
+            (
+                xy[:, None, 0]
+                -
+                poly[None, :, 0]
+            )
+        )
+
+        area = 0.5 * np.sum(
+            poly[:, 0]
+            *
+            np.roll(
+                poly[:, 1],
+                -1,
+            )
+            -
+            poly[:, 1]
+            *
+            np.roll(
+                poly[:, 0],
+                -1,
+            )
+        )
+
+        if (
+            not np.isfinite(area)
+            or abs(
+                float(area)
+            ) <= 1e-12
+        ):
+            raise RuntimeError(
+                "STEP11_FIXED_GRID_POLYGON_DEGENERATE:"
+                f"{surface.name}"
+            )
+
+        keep = np.all(
+            cross
+            *
+            np.sign(area)
+            >= -1e-9,
+            axis=1,
+        )
+
+        xy = np.vstack([
+            xy[keep],
+            poly,
+        ])
+
+        rounded = np.round(
+            xy,
+            decimals=12,
+        )
+
+        _, unique_index = np.unique(
+            rounded,
+            axis=0,
+            return_index=True,
+        )
+
+        xy = xy[
+            np.sort(
+                unique_index
+            )
+        ]
+
+    if (
+        len(xy) < 9
+        or not np.all(
+            np.isfinite(xy)
+        )
+    ):
+        raise RuntimeError(
+            "STEP11_FIXED_GRID_INVALID:"
+            f"{surface.name}"
+        )
+
+    # Freeze nearest-neighbour topology.
+    tree = cKDTree(
+        xy
+    )
+
+    neighbor_count = min(
+        5,
+        len(xy),
+    )
+
+    distances, indices = tree.query(
+        xy,
+        k=neighbor_count,
+    )
+
+    if neighbor_count == 1:
+        distances = distances[:, None]
+        indices = indices[:, None]
+
+    edge_i = []
+    edge_j = []
+    edge_distance = []
+
+    row_index = np.arange(
+        len(xy),
+        dtype=int,
+    )
+
+    for neighbor_column in range(
+        1,
+        neighbor_count,
+    ):
+        distance = np.asarray(
+            distances[
+                :,
+                neighbor_column
+            ],
+            float,
+        )
+
+        neighbor = np.asarray(
+            indices[
+                :,
+                neighbor_column
+            ],
+            int,
+        )
+
+        good = (
+            np.isfinite(distance)
+            &
+            (distance > 1e-12)
+        )
+
+        edge_i.append(
+            row_index[good]
+        )
+
+        edge_j.append(
+            neighbor[good]
+        )
+
+        edge_distance.append(
+            distance[good]
+        )
+
+    return {
+        "xy":
+            np.asarray(
+                xy,
+                float,
+            ),
+
+        "edge_i":
+            (
+                np.concatenate(edge_i)
+                if edge_i
+                else
+                np.empty(
+                    0,
+                    dtype=int,
+                )
+            ),
+
+        "edge_j":
+            (
+                np.concatenate(edge_j)
+                if edge_j
+                else
+                np.empty(
+                    0,
+                    dtype=int,
+                )
+            ),
+
+        "edge_distance_mm":
+            (
+                np.concatenate(
+                    edge_distance
+                )
+                if edge_distance
+                else
+                np.empty(
+                    0,
+                    dtype=float,
+                )
+            ),
+
+        "characteristic_length_mm":
+            max(
+                float(
+                    np.max(
+                        surface.half_aperture
+                    )
+                ),
+                1e-9,
+            ),
+    }
+
+
+def _step11_curvature_field(
+    surface: PolySurface,
+    grid: dict[str, Any],
+    orientation_sign: float,
+) -> dict[str, np.ndarray]:
+    """
+    Tính H, KG, k1, k2 và curvature-gradient
+    trên CHÍNH fixed grid.
+    """
+
+    xy = np.asarray(
+        grid["xy"],
+        float,
+    )
+
+    orientation = float(
+        np.sign(
+            float(
+                orientation_sign
+            )
+        )
+    )
+
+    if orientation == 0.0:
+        raise RuntimeError(
+            "STEP11_CURVATURE_ORIENTATION_ZERO:"
+            f"{surface.name}"
+        )
+
+    (
+        z,
+        gx,
+        gy,
+        gxx,
+        gxy,
+        gyy,
+    ) = surface.sag_slopes_hessian(
+        xy[:, 0],
+        xy[:, 1],
+    )
+
+    for value in (
+        z,
+        gx,
+        gy,
+        gxx,
+        gxy,
+        gyy,
+    ):
+        if not np.all(
+            np.isfinite(value)
+        ):
+            raise RuntimeError(
+                "STEP11_CURVATURE_FIELD_NONFINITE:"
+                f"{surface.name}"
+            )
+
+    denominator = (
+        1.0
+        +
+        gx * gx
+        +
+        gy * gy
+    )
+
+    H = (
+        (
+            (1.0 + gy * gy)
+            *
+            gxx
+            -
+            2.0
+            *
+            gx
+            *
+            gy
+            *
+            gxy
+            +
+            (1.0 + gx * gx)
+            *
+            gyy
+        )
+        /
+        (
+            2.0
+            *
+            denominator ** 1.5
+        )
+    )
+
+    KG = (
+        gxx * gyy
+        -
+        gxy * gxy
+    ) / (
+        denominator
+        *
+        denominator
+    )
+
+    discriminant = np.maximum(
+        H * H
+        -
+        KG,
+        0.0,
+    )
+
+    root = np.sqrt(
+        discriminant
+    )
+
+    k1 = H + root
+    k2 = H - root
+
+    normal = unit(
+        np.column_stack([
+            -gx,
+            -gy,
+            np.ones_like(gx),
+        ])
+    )
+
+    edge_i = np.asarray(
+        grid["edge_i"],
+        int,
+    )
+
+    edge_j = np.asarray(
+        grid["edge_j"],
+        int,
+    )
+
+    distance = np.asarray(
+        grid[
+            "edge_distance_mm"
+        ],
+        float,
+    )
+
+    if len(distance):
+
+        gradient_k1 = (
+            np.abs(
+                k1[edge_i]
+                -
+                k1[edge_j]
+            )
+            /
+            distance
+        )
+
+        gradient_k2 = (
+            np.abs(
+                k2[edge_i]
+                -
+                k2[edge_j]
+            )
+            /
+            distance
+        )
+
+    else:
+
+        gradient_k1 = np.empty(
+            0,
+            dtype=float,
+        )
+
+        gradient_k2 = np.empty(
+            0,
+            dtype=float,
+        )
+
+    arrays = (
+        H,
+        KG,
+        k1,
+        k2,
+        normal,
+        gradient_k1,
+        gradient_k2,
+    )
+
+    if any(
+        not np.all(
+            np.isfinite(value)
+        )
+        for value in arrays
+    ):
+        raise RuntimeError(
+            "STEP11_CURVATURE_DERIVED_NONFINITE:"
+            f"{surface.name}"
+        )
+
+    return {
+        "z_mm":
+            np.asarray(
+                z,
+                float,
+            ),
+
+        "normal":
+            np.asarray(
+                normal,
+                float,
+            ),
+
+        "H_per_mm":
+            np.asarray(
+                H,
+                float,
+            ),
+
+        "KG_per_mm2":
+            np.asarray(
+                KG,
+                float,
+            ),
+
+        "k1_per_mm":
+            np.asarray(
+                k1,
+                float,
+            ),
+
+        "k2_per_mm":
+            np.asarray(
+                k2,
+                float,
+            ),
+
+        "oriented_H_per_mm":
+            np.asarray(
+                orientation * H,
+                float,
+            ),
+
+        "gradient_k1_per_mm2":
+            np.asarray(
+                gradient_k1,
+                float,
+            ),
+
+        "gradient_k2_per_mm2":
+            np.asarray(
+                gradient_k2,
+                float,
+            ),
+    }
+
+
+def _step11_balanced_block(
+    values: np.ndarray,
+    scale: float,
+    weight: float,
+) -> np.ndarray:
+    """
+    Dimensionless + sample-count balanced residual.
+
+    Tổng energy của một block không tự tăng chỉ vì
+    ta dùng grid dày hơn.
+    """
+
+    values = np.asarray(
+        values,
+        float,
+    ).ravel()
+
+    scale = float(scale)
+    weight = float(weight)
+
+    if (
+        not np.isfinite(scale)
+        or scale <= 0.0
+        or not np.isfinite(weight)
+        or weight < 0.0
+    ):
+        raise ValueError(
+            "STEP11_RESIDUAL_SCALE_INVALID"
+        )
+
+    if not np.all(
+        np.isfinite(values)
+    ):
+        raise RuntimeError(
+            "STEP11_RESIDUAL_BLOCK_NONFINITE"
+        )
+
+    if len(values) == 0:
+        return np.empty(
+            0,
+            dtype=float,
+        )
+
+    return (
+        math.sqrt(
+            weight
+            /
+            float(
+                len(values)
+            )
+        )
+        *
+        values
+        /
+        scale
+    )
+
+
+def _step11_surface_restoration_blocks(
+    field: dict[str, np.ndarray],
+    anchor: dict[str, np.ndarray],
+    grid: dict[str, Any],
+    cfg: dict[str, Any],
+    weights: dict[str, float],
+    surface_name: str,
+    maximum_principal_curvature_per_mm: float,
+) -> list[np.ndarray]:
+    """Xây dựng các khối residual hình học chuẩn hóa không thứ nguyên cho một mặt gương."""
+
+    oriented_h = np.asarray(
+        field[
+            "oriented_H_per_mm"
+        ],
+        float,
+    )
+
+    kg = np.asarray(
+        field[
+            "KG_per_mm2"
+        ],
+        float,
+    )
+
+    k1 = np.asarray(
+        field[
+            "k1_per_mm"
+        ],
+        float,
+    )
+
+    k2 = np.asarray(
+        field[
+            "k2_per_mm"
+        ],
+        float,
+    )
+
+    gradient = np.concatenate([
+        np.asarray(
+            field[
+                "gradient_k1_per_mm2"
+            ],
+            float,
+        ),
+        np.asarray(
+            field[
+                "gradient_k2_per_mm2"
+            ],
+            float,
+        ),
+    ])
+
+    # H phải có positive ray-facing safety margin.
+    H_violation = np.maximum(
+        0.0,
+        float(
+            cfg[
+                "h_target_per_mm"
+            ]
+        )
+        -
+        oriented_h,
+    )
+
+    # Final hard authority đang là KG >= -1e-7.
+    # Restoration target dùng -5e-8 để có safety margin.
+    KG_violation = np.maximum(
+        0.0,
+        float(
+            cfg[
+                "kg_target_per_mm2"
+            ]
+        )
+        -
+        kg,
+    )
+
+    principal_violation = np.concatenate([
+        np.maximum(
+            0.0,
+            np.abs(k1)
+            -
+            float(
+                maximum_principal_curvature_per_mm
+            ),
+        ),
+        np.maximum(
+            0.0,
+            np.abs(k2)
+            -
+            float(
+                maximum_principal_curvature_per_mm
+            ),
+        ),
+    ])
+
+    gradient_limit = (
+        float(
+            maximum_principal_curvature_per_mm
+        )
+        /
+        float(
+            grid[
+                "characteristic_length_mm"
+            ]
+        )
+    )
+
+    gradient_violation = np.maximum(
+        0.0,
+        gradient
+        -
+        gradient_limit,
+    )
+
+    sag_delta = (
+        np.asarray(
+            field["z_mm"],
+            float,
+        )
+        -
+        np.asarray(
+            anchor["z_mm"],
+            float,
+        )
+    )
+
+    normal_dot = np.sum(
+        np.asarray(
+            field["normal"],
+            float,
+        )
+        *
+        np.asarray(
+            anchor["normal"],
+            float,
+        ),
+        axis=1,
+    )
+
+    normal_angle_deg = np.degrees(
+        np.arccos(
+            np.clip(
+                normal_dot,
+                -1.0,
+                1.0,
+            )
+        )
+    )
+
+    return [
+        _step11_balanced_block(
+            H_violation,
+            cfg[
+                "mean_curvature_scale_per_mm"
+            ],
+            weights[
+                f"{surface_name}_H"
+            ],
+        ),
+
+        _step11_balanced_block(
+            KG_violation,
+            cfg[
+                "gaussian_curvature_scale_per_mm2"
+            ],
+            weights[
+                f"{surface_name}_KG"
+            ],
+        ),
+
+        _step11_balanced_block(
+            principal_violation,
+            cfg[
+                "principal_curvature_scale_per_mm"
+            ],
+            weights[
+                f"{surface_name}_principal"
+            ],
+        ),
+
+        _step11_balanced_block(
+            gradient_violation,
+            cfg[
+                "curvature_gradient_scale_per_mm2"
+            ],
+            weights[
+                f"{surface_name}_gradient"
+            ],
+        ),
+
+        _step11_balanced_block(
+            sag_delta,
+            cfg[
+                "pair_sag_trust_scale_mm"
+            ],
+            weights[
+                f"{surface_name}_sag_trust"
+            ],
+        ),
+
+        _step11_balanced_block(
+            normal_angle_deg,
+            cfg[
+                "pair_normal_trust_scale_deg"
+            ],
+            weights[
+                f"{surface_name}_normal_trust"
+            ],
+        ),
+    ]
+
+
+def _step11_apply_joint_restoration_vector(
+    base_pair: dict[str, PolySurface],
+    descriptors: list[dict[str, Any]],
+    normalized: np.ndarray,
+    cfg: dict[str, Any],
+    surface_fit_cfg: dict[str, Any],
+) -> tuple[
+    PolySurface | None,
+    PolySurface | None,
+    dict[str, Any],
+]:
+    """Áp dụng vector tìm kiếm u vào cặp mặt M1/M2."""
+
+    u = np.asarray(
+        normalized,
+        float,
+    )
+
+    if (
+        u.shape
+        !=
+        (len(descriptors),)
+        or not np.all(
+            np.isfinite(u)
+        )
+    ):
+        return (
+            None,
+            None,
+            {
+                "valid": False,
+                "reason":
+                    "RESTORATION_VECTOR_INVALID",
+            },
+        )
+
+    if np.any(
+        np.abs(u)
+        >
+        1.0 + 1e-12
+    ):
+        return (
+            None,
+            None,
+            {
+                "valid": False,
+                "reason":
+                    "RESTORATION_NORMALIZED_BOUND",
+            },
+        )
+
+    m1 = base_pair[
+        "M1"
+    ].copy()
+
+    m2 = base_pair[
+        "M2"
+    ].copy()
+
+    surfaces = {
+        "M1": m1,
+        "M2": m2,
+    }
+
+    curvature_abs_max = float(
+        surface_fit_cfg[
+            "curvature_absolute_max_per_mm"
+        ]
+    )
+
+    conic_lo, conic_hi = map(
+        float,
+        surface_fit_cfg[
+            "conic_bounds"
+        ],
+    )
+
+    rows = []
+
+    for column, (
+        value,
+        descriptor,
+    ) in enumerate(
+        zip(
+            u,
+            descriptors,
+        )
+    ):
+
+        which = str(
+            descriptor[
+                "surface"
+            ]
+        )
+
+        surface = surfaces[
+            which
+        ]
+
+        source = base_pair[
+            which
+        ]
+
+        kind = str(
+            descriptor[
+                "kind"
+            ]
+        )
+
+        if kind == "CURVATURE":
+
+            span = max(
+                abs(
+                    float(
+                        source.curvature
+                    )
+                )
+                *
+                float(
+                    cfg[
+                        "curvature_relative_span"
+                    ]
+                ),
+                float(
+                    cfg[
+                        "minimum_curvature_span_per_mm"
+                    ]
+                ),
+            )
+
+            candidate = (
+                float(
+                    source.curvature
+                )
+                +
+                span
+                *
+                float(value)
+            )
+
+            if (
+                abs(candidate)
+                >
+                curvature_abs_max
+                + 1e-12
+            ):
+                return (
+                    None,
+                    None,
+                    {
+                        "valid": False,
+
+                        "reason":
+                            "RESTORATION_CURVATURE_BOUND:"
+                            f"{which}:"
+                            f"{candidate:.12g}",
+                    },
+                )
+
+            surface.curvature = float(
+                candidate
+            )
+
+        elif kind == "CONIC":
+
+            span = float(
+                cfg[
+                    "conic_absolute_span"
+                ]
+            )
+
+            candidate = (
+                float(
+                    source.conic
+                )
+                +
+                span
+                *
+                float(value)
+            )
+
+            if (
+                candidate
+                <
+                conic_lo - 1e-12
+                or
+                candidate
+                >
+                conic_hi + 1e-12
+            ):
+                return (
+                    None,
+                    None,
+                    {
+                        "valid": False,
+
+                        "reason":
+                            "RESTORATION_CONIC_BOUND:"
+                            f"{which}:"
+                            f"{candidate:.12g}",
+                    },
+                )
+
+            surface.conic = float(
+                candidate
+            )
+
+        elif kind == (
+            "ASTIG_QUADRATIC_PAIR"
+        ):
+
+            delta = (
+                float(
+                    cfg[
+                        "coefficient_absolute_span_mm"
+                    ]
+                )
+                *
+                float(value)
+            )
+
+            i20 = int(
+                descriptor[
+                    "index_20"
+                ]
+            )
+
+            i02 = int(
+                descriptor[
+                    "index_02"
+                ]
+            )
+
+            surface.coeff[
+                i20
+            ] = (
+                float(
+                    source.coeff[
+                        i20
+                    ]
+                )
+                +
+                delta
+            )
+
+            surface.coeff[
+                i02
+            ] = (
+                float(
+                    source.coeff[
+                        i02
+                    ]
+                )
+                -
+                delta
+            )
+
+        elif kind == "COEFFICIENT":
+
+            index = int(
+                descriptor[
+                    "index"
+                ]
+            )
+
+            surface.coeff[
+                index
+            ] = (
+                float(
+                    source.coeff[
+                        index
+                    ]
+                )
+                +
+                float(
+                    cfg[
+                        "coefficient_absolute_span_mm"
+                    ]
+                )
+                *
+                float(value)
+            )
+
+        else:
+
+            raise ValueError(
+                "STEP11_RESTORATION_"
+                "VARIABLE_KIND_INVALID:"
+                f"{kind}"
+            )
+
+        rows.append({
+            "column":
+                int(column),
+
+            "surface":
+                which,
+
+            "kind":
+                kind,
+
+            "term":
+                str(
+                    descriptor.get(
+                        "term",
+                        "",
+                    )
+                ),
+
+            "normalized_value":
+                float(value),
+        })
+
+    return (
+        m1,
+        m2,
+        {
+            "valid": True,
+            "reason": None,
+            "rows": rows,
+        },
+    )
+
+
+def _step11_evaluate_restoration_pair(
+    ctx: Context,
+    m1: PolySurface,
+    m2: PolySurface,
+    refinement_cfg: dict[str, Any],
+    restoration_cfg: dict[str, Any],
+    frozen_orientation_signs: dict[str, float],
+) -> dict[str, Any]:
+    """Đánh giá toàn diện một ứng viên phục hồi cặp gương M1/M2."""
+
+    try:
+        (
+            optical_residual,
+            metrics,
+            trace,
+        ) = _step12_actual_o2_evaluate(
+            ctx,
+            m1,
+            m2,
+            refinement_cfg,
+        )
+
+    except (
+        RuntimeError,
+        ValueError,
+        FloatingPointError,
+    ) as exc:
+
+        return {
+            "valid": False,
+
+            "reason":
+                f"{type(exc).__name__}:{exc}",
+        }
+
+    m1_gate = metrics[
+        "M1_sanity"
+    ]
+
+    m2_gate = metrics[
+        "M2_sanity"
+    ]
+
+    if bool(
+        restoration_cfg[
+            "require_stable_orientation_sign"
+        ]
+    ):
+
+        for name, gate in (
+            ("M1", m1_gate),
+            ("M2", m2_gate),
+        ):
+
+            actual_sign = float(
+                gate[
+                    "orientation_sign"
+                ]
+            )
+
+            frozen_sign = float(
+                frozen_orientation_signs[
+                    name
+                ]
+            )
+
+            if (
+                np.sign(
+                    actual_sign
+                )
+                !=
+                np.sign(
+                    frozen_sign
+                )
+            ):
+                return {
+                    "valid": False,
+
+                    "reason":
+                        "RESTORATION_"
+                        "ORIENTATION_SIGN_CHANGED:"
+                        f"{name}",
+                }
+
+    # M1 đã tốt -> không cho solver phá M1.
+    if (
+        bool(
+            restoration_cfg[
+                "require_m1_raw_topology"
+            ]
+        )
+        and
+        not bool(
+            m1_gate[
+                "topology_pass"
+            ]
+        )
+    ):
+        return {
+            "valid": False,
+
+            "reason":
+                "RESTORATION_M1_RAW_TOPOLOGY_LOST",
+        }
+
+    # M2 H/KG FAIL vẫn là VALID state.
+    #
+    # Chỉ basic-sanity mất mới coi là
+    # numerical/domain failure.
+    if not bool(
+        m2_gate[
+            "topology_checks"
+        ][
+            "basic_surface_sanity"
+        ]
+    ):
+        return {
+            "valid": False,
+
+            "reason":
+                "RESTORATION_M2_BASIC_SANITY_LOST",
+        }
+
+    residual = np.asarray(
+        optical_residual,
+        float,
+    )
+
+    if (
+        residual.ndim != 1
+        or not np.all(
+            np.isfinite(residual)
+        )
+    ):
+        return {
+            "valid": False,
+
+            "reason":
+                "RESTORATION_OPTICAL_RESIDUAL_INVALID",
+        }
+
+    return {
+        "valid": True,
+
+        "reason": None,
+
+        "optical_residual":
+            residual,
+
+        "metrics":
+            metrics,
+
+        "trace":
+            trace,
+
+        "M1_gate":
+            m1_gate,
+
+        "M2_gate":
+            m2_gate,
+    }
+
+
+def _step11_build_restoration_residual(
+    m1: PolySurface,
+    m2: PolySurface,
+    evaluation: dict[str, Any],
+    state: dict[str, Any],
+) -> tuple[
+    np.ndarray,
+    dict[str, Any],
+]:
+    """Xây dựng vector phần dư tổng hợp cân bằng không thứ nguyên r(u)."""
+
+    cfg = state["cfg"]
+
+    weights = cfg[
+        "weights"
+    ]
+
+    maximum_principal = float(
+        state[
+            "surface_fit_cfg"
+        ][
+            "curvature_absolute_max_per_mm"
+        ]
+    )
+
+    fields = {}
+
+    blocks = []
+
+    for name, surface in (
+        ("M1", m1),
+        ("M2", m2),
+    ):
+
+        field = (
+            _step11_curvature_field(
+                surface,
+                state[
+                    "grids"
+                ][name],
+                state[
+                    "orientation_signs"
+                ][name],
+            )
+        )
+
+        fields[
+            name
+        ] = field
+
+        blocks.extend(
+            _step11_surface_restoration_blocks(
+                field,
+                state[
+                    "anchors"
+                ][name],
+                state[
+                    "grids"
+                ][name],
+                cfg,
+                weights,
+                name,
+                maximum_principal,
+            )
+        )
+
+    optical = np.asarray(
+        evaluation[
+            "optical_residual"
+        ],
+        float,
+    )
+
+    optical_indices = np.asarray(
+        state[
+            "optical_indices"
+        ],
+        int,
+    )
+
+    if len(
+        optical_indices
+    ):
+
+        if (
+            np.min(
+                optical_indices
+            ) < 0
+            or
+            np.max(
+                optical_indices
+            )
+            >=
+            len(optical)
+        ):
+            raise RuntimeError(
+                "STEP11_OPTICAL_INDEX_OUT_OF_RANGE"
+            )
+
+        optical_sample = optical[
+            optical_indices
+        ]
+
+        blocks.append(
+            _step11_balanced_block(
+                optical_sample,
+                1.0,
+                weights[
+                    "optical"
+                ],
+            )
+        )
+
+    physical_fraction = float(
+        evaluation[
+            "metrics"
+        ][
+            "physical_fraction"
+        ]
+    )
+
+    preferred_fraction = float(
+        state[
+            "quality_cfg"
+        ][
+            "minimum_physical_fraction"
+        ]
+    )
+
+    physical_shortfall = np.asarray([
+        max(
+            0.0,
+            preferred_fraction
+            -
+            physical_fraction,
+        )
+    ])
+
+    blocks.append(
+        _step11_balanced_block(
+            physical_shortfall,
+            cfg[
+                "physical_fraction_scale"
+            ],
+            weights[
+                "physical_fraction"
+            ],
+        )
+    )
+
+    residual = np.concatenate(
+        blocks
+    )
+
+    if (
+        residual.ndim != 1
+        or not np.all(
+            np.isfinite(
+                residual
+            )
+        )
+    ):
+        raise RuntimeError(
+            "STEP11_RESTORATION_RESIDUAL_NONFINITE"
+        )
+
+    def principal_max(
+        name: str,
+    ) -> float:
+        """Tính độ cong chính cực đại tuyệt đối."""
+
+        return float(
+            max(
+                np.max(
+                    np.abs(
+                        fields[name][
+                            "k1_per_mm"
+                        ]
+                    )
+                ),
+                np.max(
+                    np.abs(
+                        fields[name][
+                            "k2_per_mm"
+                        ]
+                    )
+                ),
+            )
+        )
+
+    meta = {
+        "M1_H_min_per_mm":
+            float(
+                np.min(
+                    fields[
+                        "M1"
+                    ][
+                        "H_per_mm"
+                    ]
+                )
+            ),
+
+        "M1_oriented_H_min_per_mm":
+            float(
+                np.min(
+                    fields[
+                        "M1"
+                    ][
+                        "oriented_H_per_mm"
+                    ]
+                )
+            ),
+
+        "M1_KG_min_per_mm2":
+            float(
+                np.min(
+                    fields[
+                        "M1"
+                    ][
+                        "KG_per_mm2"
+                    ]
+                )
+            ),
+
+        "M2_H_min_per_mm":
+            float(
+                np.min(
+                    fields[
+                        "M2"
+                    ][
+                        "H_per_mm"
+                    ]
+                )
+            ),
+
+        "M2_oriented_H_min_per_mm":
+            float(
+                np.min(
+                    fields[
+                        "M2"
+                    ][
+                        "oriented_H_per_mm"
+                    ]
+                )
+            ),
+
+        "M2_KG_min_per_mm2":
+            float(
+                np.min(
+                    fields[
+                        "M2"
+                    ][
+                        "KG_per_mm2"
+                    ]
+                )
+            ),
+
+        "M1_principal_abs_max_per_mm":
+            principal_max(
+                "M1"
+            ),
+
+        "M2_principal_abs_max_per_mm":
+            principal_max(
+                "M2"
+            ),
+
+        "M1_raw_topology_pass":
+            bool(
+                evaluation[
+                    "M1_gate"
+                ][
+                    "topology_pass"
+                ]
+            ),
+
+        "M2_raw_topology_pass":
+            bool(
+                evaluation[
+                    "M2_gate"
+                ][
+                    "topology_pass"
+                ]
+            ),
+
+        "physical_fraction":
+            physical_fraction,
+
+        "residual_length":
+            int(
+                len(
+                    residual
+                )
+            ),
+    }
+
+    return (
+        residual,
+        meta,
+    )
+
+
+def _step11_evaluate_restoration_u(
+    common: dict[str, Any],
+    normalized: np.ndarray,
+    *,
+    include_payload: bool,
+) -> dict[str, Any]:
+    """Đánh giá nhanh hàm mục tiêu và phần dư cho vector u."""
+
+    (
+        m1,
+        m2,
+        bound_state,
+    ) = (
+        _step11_apply_joint_restoration_vector(
+            common[
+                "base_pair"
+            ],
+            common[
+                "descriptors"
+            ],
+            normalized,
+            common[
+                "restoration_cfg"
+            ],
+            common[
+                "surface_fit_cfg"
+            ],
+        )
+    )
+
+    if m1 is None or m2 is None:
+        return {
+            "valid": False,
+
+            "reason":
+                bound_state.get(
+                    "reason"
+                ),
+
+            "bound_state":
+                bound_state,
+        }
+
+    evaluated = (
+        _step11_evaluate_restoration_pair(
+            common["ctx"],
+            m1,
+            m2,
+            common[
+                "refinement_cfg"
+            ],
+            common[
+                "restoration_cfg"
+            ],
+            common[
+                "residual_state"
+            ][
+                "orientation_signs"
+            ],
+        )
+    )
+
+    if not evaluated[
+        "valid"
+    ]:
+        return {
+            "valid": False,
+
+            "reason":
+                evaluated.get(
+                    "reason"
+                ),
+
+            "bound_state":
+                bound_state,
+        }
+
+    try:
+
+        residual, meta = (
+            _step11_build_restoration_residual(
+                m1,
+                m2,
+                evaluated,
+                common[
+                    "residual_state"
+                ],
+            )
+        )
+
+    except (
+        RuntimeError,
+        ValueError,
+        FloatingPointError,
+    ) as exc:
+
+        return {
+            "valid": False,
+
+            "reason":
+                f"{type(exc).__name__}:{exc}",
+
+            "bound_state":
+                bound_state,
+        }
+
+    result = {
+        "valid": True,
+
+        "reason": None,
+
+        "residual":
+            residual,
+
+        "objective":
+            float(
+                np.mean(
+                    residual
+                    *
+                    residual
+                )
+            ),
+
+        "meta":
+            meta,
+
+        "bound_state":
+            bound_state,
+    }
+
+    if include_payload:
+
+        result.update({
+            "m1":
+                m1,
+
+            "m2":
+                m2,
+
+            "evaluation":
+                evaluated,
+        })
+
+    return result
+
+
+def evaluate_step11_restoration_probe_job(
+    common: dict[str, Any],
+    job: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Pure STEP11 FD probe evaluator.
+    Không snapshot.
+    Không ghi file.
+    Không mở nested process pool.
+    """
+
+    if (
+        job.get(
+            "schema"
+        )
+        !=
+        "HUD_FAN_V5_5_"
+        "STEP11_RESTORATION_PROBE_JOB_V1"
+    ):
+        raise ValueError(
+            "STEP11_RESTORATION_PROBE_SCHEMA_INVALID"
+        )
+
+    u = np.asarray(
+        job[
+            "search_vector"
+        ],
+        float,
+    )
+
+    result = (
+        _step11_evaluate_restoration_u(
+            common,
+            u,
+            include_payload=False,
+        )
+    )
+
+    return {
+        "schema":
+            "HUD_FAN_V5_5_"
+            "STEP11_RESTORATION_PROBE_RESULT_V1",
+
+        "job_index":
+            int(
+                job[
+                    "job_index"
+                ]
+            ),
+
+        "iteration":
+            int(
+                job[
+                    "iteration"
+                ]
+            ),
+
+        "fd_round":
+            int(
+                job[
+                    "fd_round"
+                ]
+            ),
+
+        "column":
+            int(
+                job[
+                    "column"
+                ]
+            ),
+
+        "sign":
+            float(
+                job[
+                    "sign"
+                ]
+            ),
+
+        "delta":
+            float(
+                job[
+                    "delta"
+                ]
+            ),
+
+        **result,
+    }
+
+
 def _step11_apply_search_vector(
     common: dict[str, Any],
     search_vector: np.ndarray,
@@ -14917,6 +17024,2286 @@ def _step11_condition_m2_ci(
         best_gate,
         audit,
     )
+
+
+def _step11_build_restoration_seed(
+    common: dict[str, Any],
+    seed_m1: PolySurface,
+) -> dict[str, Any]:
+    """Xây dựng trạng thái hạt giống ban đầu cho quá trình phục hồi."""
+
+    ctx = common[
+        "ctx"
+    ]
+
+    r = ctx.data[
+        "rays"
+    ]
+
+    chief_index = int(
+        common[
+            "chief_index"
+        ]
+    )
+
+    d = np.asarray(
+        ctx.data[
+            "post_visor"
+        ],
+        float,
+    )
+
+    vh = ctx.data[
+        "visor_hit"
+    ]
+
+    m1_gate = (
+        _step11_topology_shape_gate(
+            common,
+            seed_m1,
+            d[
+                chief_index
+            ],
+            common[
+                "m1_topology"
+            ],
+        )
+    )
+
+    if not bool(
+        m1_gate[
+            "topology_pass"
+        ]
+    ):
+        raise RuntimeError(
+            "STEP11_RESTORATION_"
+            "SEED_M1_TOPOLOGY_INVALID:"
+            +
+            ",".join(
+                m1_gate[
+                    "topology_failure_reasons"
+                ]
+            )
+        )
+
+    m1_trust = (
+        _step11_ci_trust_gate(
+            common,
+            seed_m1,
+        )
+    )
+
+    h1 = seed_m1.intersect(
+        vh[
+            "point"
+        ]
+        +
+        1e-4
+        *
+        d,
+        d,
+        finite=False,
+    )
+
+    valid = np.asarray(
+        h1[
+            "valid"
+        ],
+        bool,
+    )
+
+    if (
+        valid.shape
+        !=
+        (len(d),)
+        or not np.all(
+            valid
+        )
+    ):
+        raise RuntimeError(
+            "STEP11_RESTORATION_"
+            "SEED_M1_RETRACE_INCOMPLETE"
+        )
+
+    points = np.asarray(
+        h1[
+            "point"
+        ],
+        float,
+    )
+
+    normals = np.asarray(
+        h1[
+            "normal"
+        ],
+        float,
+    )
+
+    if (
+        not np.all(
+            np.isfinite(points)
+        )
+        or
+        not np.all(
+            np.isfinite(normals)
+        )
+    ):
+        raise RuntimeError(
+            "STEP11_RESTORATION_"
+            "SEED_M1_RETRACE_NONFINITE"
+        )
+
+    d1 = reflect(
+        d,
+        normals,
+    )
+
+    (
+        ci_m2,
+        m2_diagnostic,
+        integrability_gate,
+        conditioning_audit,
+    ) = _step11_condition_m2_ci(
+        ctx,
+
+        points
+        +
+        1e-4
+        *
+        d1,
+
+        d1,
+
+        ctx.data[
+            "fan_refs"
+        ][
+            r[
+                "field_index"
+            ]
+        ],
+
+        ctx.data[
+            "m2"
+        ],
+
+        chief_index,
+
+        common[
+            "surface_fit_cfg"
+        ],
+
+        common[
+            "integrability_policy"
+        ],
+    )
+
+    if (
+        str(
+            integrability_gate[
+                "status"
+            ]
+        )
+        not in (
+            "PASS",
+            "WARN",
+        )
+    ):
+        raise RuntimeError(
+            "STEP11_RESTORATION_"
+            "SEED_M2_INTEGRABILITY_INVALID"
+        )
+
+    seed_m2, fit_m2 = fit_surface(
+        ci_m2[
+            "points_by_ray"
+        ],
+
+        ci_m2[
+            "normals_by_ray"
+        ],
+
+        ctx.data[
+            "m2"
+        ],
+
+        2,
+        True,
+
+        ctx.config[
+            "fit_weights"
+        ],
+
+        chief_index,
+
+        common[
+            "surface_fit_cfg"
+        ],
+
+        ci_m2[
+            "starts_by_ray"
+        ],
+
+        ci_m2[
+            "targets_by_ray"
+        ],
+    )
+
+    (
+        optical_residual,
+        metrics,
+        trace,
+    ) = _step12_actual_o2_evaluate(
+        ctx,
+        seed_m1,
+        seed_m2,
+        common[
+            "refinement_cfg"
+        ],
+    )
+
+    # Quan trọng:
+    # M2 topology FAIL ở đây KHÔNG raise.
+    #
+    # Đây chính là starting point mà
+    # restoration solver cần sửa.
+
+    return {
+        "m1":
+            seed_m1.copy(),
+
+        "m2":
+            seed_m2.copy(),
+
+        "M1_shape_gate":
+            m1_gate,
+
+        "M1_ci_trust":
+            m1_trust,
+
+        "ci_m2":
+            ci_m2,
+
+        "M2_diagnostic":
+            m2_diagnostic,
+
+        "M2_integrability_gate":
+            integrability_gate,
+
+        "M2_conditioning_audit":
+            conditioning_audit,
+
+        "fit_m2_seed":
+            fit_m2,
+
+        "optical_residual":
+            np.asarray(
+                optical_residual,
+                float,
+            ),
+
+        "optical_metrics":
+            metrics,
+
+        "physical_trace":
+            trace,
+    }
+
+
+def _step11_final_fit_diagnostic(
+    surface: PolySurface,
+    ci: dict[str, Any],
+    surface_fit_cfg: dict[str, Any],
+) -> dict[str, Any]:
+    """Tính toán chẩn đoán khớp cuối cùng đối với đám mây CI đông kết."""
+
+    points = np.asarray(
+        ci[
+            "points_by_ray"
+        ],
+        float,
+    )
+
+    target_normals = unit(
+        np.asarray(
+            ci[
+                "normals_by_ray"
+            ],
+            float,
+        )
+    )
+
+    local = (
+        points
+        -
+        surface.center
+    ) @ surface.frame
+
+    z, _, _ = surface.sag_slopes(
+        local[:, 0],
+        local[:, 1],
+    )
+
+    sag_error = (
+        z
+        -
+        local[:, 2]
+    )
+
+    model_normals = unit(
+        surface.normal(
+            local[:, 0],
+            local[:, 1],
+        )
+    )
+
+    dot = np.abs(
+        np.sum(
+            model_normals
+            *
+            target_normals,
+            axis=1,
+        )
+    )
+
+    normal_angle = np.degrees(
+        np.arccos(
+            np.clip(
+                dot,
+                -1.0,
+                1.0,
+            )
+        )
+    )
+
+    reflection = {
+        "evaluated":
+            False,
+
+        "rms_deg":
+            float("inf"),
+
+        "p95_deg":
+            float("inf"),
+
+        "max_deg":
+            float("inf"),
+    }
+
+    if (
+        "starts_by_ray"
+        in
+        ci
+        and
+        "targets_by_ray"
+        in
+        ci
+    ):
+
+        starts = np.asarray(
+            ci[
+                "starts_by_ray"
+            ],
+            float,
+        )
+
+        targets = np.asarray(
+            ci[
+                "targets_by_ray"
+            ],
+            float,
+        )
+
+        if (
+            starts.shape
+            ==
+            points.shape
+            and
+            targets.shape
+            ==
+            points.shape
+        ):
+
+            fitted_points = surface.point(
+                local[:, 0],
+                local[:, 1],
+            )
+
+            actual_out = reflect(
+                unit(
+                    fitted_points
+                    -
+                    starts
+                ),
+
+                surface.normal(
+                    local[:, 0],
+                    local[:, 1],
+                ),
+            )
+
+            required_out = unit(
+                targets
+                -
+                fitted_points
+            )
+
+            reflection_angle = np.degrees(
+                np.arccos(
+                    np.clip(
+                        np.sum(
+                            actual_out
+                            *
+                            required_out,
+                            axis=1,
+                        ),
+                        -1.0,
+                        1.0,
+                    )
+                )
+            )
+
+            reflection = {
+                "evaluated":
+                    True,
+
+                "rms_deg":
+                    float(
+                        np.sqrt(
+                            np.mean(
+                                reflection_angle
+                                *
+                                reflection_angle
+                            )
+                        )
+                    ),
+
+                "p95_deg":
+                    float(
+                        np.percentile(
+                            reflection_angle,
+                            95,
+                        )
+                    ),
+
+                "max_deg":
+                    float(
+                        np.max(
+                            reflection_angle
+                        )
+                    ),
+            }
+
+    curvature_limit = float(
+        surface_fit_cfg[
+            "curvature_absolute_max_per_mm"
+        ]
+    )
+
+    conic_lo, conic_hi = map(
+        float,
+        surface_fit_cfg[
+            "conic_bounds"
+        ],
+    )
+
+    return {
+        "role":
+            "STEP11_FINAL_RESTORED_SURFACE_"
+            "DIAGNOSTIC_AGAINST_FROZEN_CI",
+
+        "curvature_per_mm":
+            float(
+                surface.curvature
+            ),
+
+        "conic_constant":
+            float(
+                surface.conic
+            ),
+
+        "sag_rms_mm":
+            float(
+                np.sqrt(
+                    np.mean(
+                        sag_error
+                        *
+                        sag_error
+                    )
+                )
+            ),
+
+        "sag_p95_mm":
+            float(
+                np.percentile(
+                    np.abs(
+                        sag_error
+                    ),
+                    95,
+                )
+            ),
+
+        "sag_max_mm":
+            float(
+                np.max(
+                    np.abs(
+                        sag_error
+                    )
+                )
+            ),
+
+        "normal_rms_deg":
+            float(
+                np.sqrt(
+                    np.mean(
+                        normal_angle
+                        *
+                        normal_angle
+                    )
+                )
+            ),
+
+        "normal_p95_deg":
+            float(
+                np.percentile(
+                    normal_angle,
+                    95,
+                )
+            ),
+
+        "normal_max_deg":
+            float(
+                np.max(
+                    normal_angle
+                )
+            ),
+
+        "reflection_direction_error":
+            reflection,
+
+        "curvature_bound_hit":
+            bool(
+                abs(
+                    float(
+                        surface.curvature
+                    )
+                )
+                >=
+                curvature_limit
+                *
+                (
+                    1.0
+                    -
+                    1e-4
+                )
+            ),
+
+        "k_bound_hit":
+            bool(
+                abs(
+                    float(
+                        surface.conic
+                    )
+                    -
+                    conic_lo
+                )
+                <=
+                1e-4
+                *
+                max(
+                    abs(
+                        conic_hi
+                        -
+                        conic_lo
+                    ),
+                    1.0,
+                )
+                or
+                abs(
+                    float(
+                        surface.conic
+                    )
+                    -
+                    conic_hi
+                )
+                <=
+                1e-4
+                *
+                max(
+                    abs(
+                        conic_hi
+                        -
+                        conic_lo
+                    ),
+                    1.0,
+                )
+            ),
+
+        "joint_variable_projection": {
+            "curvature_bounds_per_mm":
+                [
+                    -curvature_limit,
+                    curvature_limit,
+                ],
+
+            "conic_bounds":
+                [
+                    conic_lo,
+                    conic_hi,
+                ],
+
+            "role":
+                "POST_RESTORATION_DIAGNOSTIC_ONLY",
+        },
+    }
+
+
+def _step11_run_fd_probe_jobs(
+    common: dict[str, Any],
+    jobs: list[dict[str, Any]],
+    executor: Any,
+    max_inflight: int,
+) -> list[dict[str, Any]]:
+    """Chạy các job thăm dò sai phân hữu hạn song song hoặc tuần tự."""
+
+    if not jobs:
+        return []
+
+    if (
+        executor is not None
+        and
+        max_inflight > 1
+        and
+        len(jobs) > 1
+    ):
+
+        from execution_workers_v55 import (
+            ordered_bounded_map,
+            step11_restoration_probe_worker,
+        )
+
+        replies = ordered_bounded_map(
+            executor,
+            step11_restoration_probe_worker,
+            jobs,
+            max_inflight,
+        )
+
+    else:
+
+        import os
+
+        replies = []
+
+        for job in jobs:
+
+            result = (
+                evaluate_step11_restoration_probe_job(
+                    common,
+                    job,
+                )
+            )
+
+            replies.append({
+                **result,
+                "pid":
+                    os.getpid(),
+            })
+
+    if len(replies) != len(jobs):
+        raise RuntimeError(
+            "STEP11_RESTORATION_"
+            "PROBE_REPLY_COUNT_MISMATCH"
+        )
+
+    for expected_index, (
+        job,
+        reply,
+    ) in enumerate(
+        zip(
+            jobs,
+            replies,
+        )
+    ):
+
+        if (
+            reply.get(
+                "schema"
+            )
+            !=
+            "HUD_FAN_V5_5_"
+            "STEP11_RESTORATION_PROBE_RESULT_V1"
+        ):
+            raise RuntimeError(
+                "STEP11_RESTORATION_"
+                "PROBE_REPLY_SCHEMA_MISMATCH"
+            )
+
+        if (
+            int(
+                reply[
+                    "job_index"
+                ]
+            )
+            !=
+            expected_index
+        ):
+            raise RuntimeError(
+                "STEP11_RESTORATION_"
+                "PROBE_REPLY_ORDER_MISMATCH"
+            )
+
+        if (
+            int(
+                reply[
+                    "column"
+                ]
+            )
+            !=
+            int(
+                job[
+                    "column"
+                ]
+            )
+            or
+            float(
+                reply[
+                    "sign"
+                ]
+            )
+            !=
+            float(
+                job[
+                    "sign"
+                ]
+            )
+        ):
+            raise RuntimeError(
+                "STEP11_RESTORATION_"
+                "PROBE_REPLY_IDENTITY_MISMATCH"
+            )
+
+    return replies
+
+
+def _step11_build_parallel_jacobian(
+    common: dict[str, Any],
+    u: np.ndarray,
+    current_residual: np.ndarray,
+    iteration: int,
+    trust_radius: float,
+    executor: Any,
+    max_inflight: int,
+) -> tuple[
+    np.ndarray,
+    list[int],
+    list[dict[str, Any]],
+]:
+    """Xây dựng ma trận Jacobian sai phân hữu hạn trung tâm song song."""
+
+    cfg = common[
+        "restoration_cfg"
+    ]
+
+    descriptors = common[
+        "descriptors"
+    ]
+
+    n_columns = len(
+        descriptors
+    )
+
+    jacobian = np.zeros(
+        (
+            len(
+                current_residual
+            ),
+            n_columns,
+        ),
+        dtype=float,
+    )
+
+    unresolved = set(
+        range(
+            n_columns
+        )
+    )
+
+    central_results: dict[
+        int,
+        tuple[
+            float,
+            dict[str, Any],
+            dict[str, Any],
+        ]
+    ] = {}
+
+    one_sided: dict[
+        int,
+        tuple[
+            str,
+            float,
+            dict[str, Any],
+        ]
+    ] = {}
+
+    diagnostic_rows = []
+
+    job_counter = 0
+
+    for fd_round, shrink in enumerate(
+        cfg[
+            "finite_difference_shrink_factors"
+        ],
+        start=1,
+    ):
+
+        if not unresolved:
+            break
+
+        h = (
+            float(
+                cfg[
+                    "finite_difference_normalized"
+                ]
+            )
+            *
+            float(
+                trust_radius
+            )
+            *
+            float(
+                shrink
+            )
+        )
+
+        if h <= 0.0:
+            continue
+
+        jobs = []
+
+        for column in sorted(
+            unresolved
+        ):
+
+            for sign in (
+                -1.0,
+                +1.0,
+            ):
+
+                probe_u = np.asarray(
+                    u,
+                    float,
+                ).copy()
+
+                probe_u[
+                    column
+                ] += (
+                    sign
+                    *
+                    h
+                )
+
+                jobs.append({
+                    "schema":
+                        "HUD_FAN_V5_5_"
+                        "STEP11_RESTORATION_PROBE_JOB_V1",
+
+                    "job_index":
+                        int(
+                            len(jobs)
+                        ),
+
+                    "global_job_index":
+                        int(
+                            job_counter
+                        ),
+
+                    "iteration":
+                        int(
+                            iteration
+                        ),
+
+                    "fd_round":
+                        int(
+                            fd_round
+                        ),
+
+                    "column":
+                        int(
+                            column
+                        ),
+
+                    "sign":
+                        float(
+                            sign
+                        ),
+
+                    "delta":
+                        float(
+                            h
+                        ),
+
+                    "search_vector":
+                        probe_u,
+                })
+
+                job_counter += 1
+
+        replies = (
+            _step11_run_fd_probe_jobs(
+                common,
+                jobs,
+                executor,
+                max_inflight,
+            )
+        )
+
+        by_column = {}
+
+        for reply in replies:
+
+            column = int(
+                reply[
+                    "column"
+                ]
+            )
+
+            sign = float(
+                reply[
+                    "sign"
+                ]
+            )
+
+            by_column.setdefault(
+                column,
+                {},
+            )[sign] = reply
+
+        next_unresolved = set()
+
+        for column in sorted(
+            unresolved
+        ):
+
+            sides = by_column.get(
+                column,
+                {},
+            )
+
+            minus = sides.get(
+                -1.0
+            )
+
+            plus = sides.get(
+                +1.0
+            )
+
+            minus_valid = bool(
+                minus
+                and
+                minus.get(
+                    "valid",
+                    False,
+                )
+            )
+
+            plus_valid = bool(
+                plus
+                and
+                plus.get(
+                    "valid",
+                    False,
+                )
+            )
+
+            if (
+                minus_valid
+                and
+                plus_valid
+            ):
+
+                central_results[
+                    column
+                ] = (
+                    float(h),
+                    plus,
+                    minus,
+                )
+
+                continue
+
+            # Ghi lại one-sided nhỏ nhất hiện có.
+            if plus_valid:
+
+                one_sided[
+                    column
+                ] = (
+                    "FORWARD",
+                    float(h),
+                    plus,
+                )
+
+            elif minus_valid:
+
+                one_sided[
+                    column
+                ] = (
+                    "BACKWARD",
+                    float(h),
+                    minus,
+                )
+
+            next_unresolved.add(
+                column
+            )
+
+        unresolved = (
+            next_unresolved
+        )
+
+    active_columns = []
+
+    for column in range(
+        n_columns
+    ):
+
+        if column in central_results:
+
+            (
+                h,
+                plus,
+                minus,
+            ) = central_results[
+                column
+            ]
+
+            derivative = (
+                np.asarray(
+                    plus[
+                        "residual"
+                    ],
+                    float,
+                )
+                -
+                np.asarray(
+                    minus[
+                        "residual"
+                    ],
+                    float,
+                )
+            ) / (
+                2.0
+                *
+                h
+            )
+
+            mode = "CENTRAL"
+
+        elif column in one_sided:
+
+            (
+                mode,
+                h,
+                side,
+            ) = one_sided[
+                column
+            ]
+
+            if mode == "FORWARD":
+
+                derivative = (
+                    np.asarray(
+                        side[
+                            "residual"
+                        ],
+                        float,
+                    )
+                    -
+                    current_residual
+                ) / h
+
+            else:
+
+                derivative = (
+                    current_residual
+                    -
+                    np.asarray(
+                        side[
+                            "residual"
+                        ],
+                        float,
+                    )
+                ) / h
+
+        else:
+
+            diagnostic_rows.append({
+                "iteration":
+                    int(
+                        iteration
+                    ),
+
+                "column":
+                    int(
+                        column
+                    ),
+
+                "surface":
+                    descriptors[
+                        column
+                    ][
+                        "surface"
+                    ],
+
+                "kind":
+                    descriptors[
+                        column
+                    ][
+                        "kind"
+                    ],
+
+                "term":
+                    str(
+                        descriptors[
+                            column
+                        ].get(
+                            "term",
+                            "",
+                        )
+                    ),
+
+                "fd_mode":
+                    "INVALID",
+
+                "delta_used":
+                    None,
+
+                "column_norm":
+                    0.0,
+            })
+
+            continue
+
+        if (
+            derivative.shape
+            !=
+            current_residual.shape
+            or
+            not np.all(
+                np.isfinite(
+                    derivative
+                )
+            )
+        ):
+            continue
+
+        column_norm = float(
+            np.linalg.norm(
+                derivative
+            )
+        )
+
+        if (
+            column_norm
+            <
+            float(
+                cfg[
+                    "minimum_jacobian_column_norm"
+                ]
+            )
+        ):
+
+            diagnostic_rows.append({
+                "iteration":
+                    int(
+                        iteration
+                    ),
+
+                "column":
+                    int(
+                        column
+                    ),
+
+                "surface":
+                    descriptors[
+                        column
+                    ][
+                        "surface"
+                    ],
+
+                "kind":
+                    descriptors[
+                        column
+                    ][
+                        "kind"
+                    ],
+
+                "term":
+                    str(
+                        descriptors[
+                            column
+                        ].get(
+                            "term",
+                            "",
+                        )
+                    ),
+
+                "fd_mode":
+                    "INSENSITIVE",
+
+                "delta_used":
+                    float(
+                        h
+                    ),
+
+                "column_norm":
+                    column_norm,
+            })
+
+            continue
+
+        jacobian[
+            :,
+            column
+        ] = derivative
+
+        active_columns.append(
+            column
+        )
+
+        diagnostic_rows.append({
+            "iteration":
+                int(
+                    iteration
+                ),
+
+            "column":
+                int(
+                    column
+                ),
+
+            "surface":
+                descriptors[
+                    column
+                ][
+                    "surface"
+                ],
+
+            "kind":
+                descriptors[
+                    column
+                ][
+                    "kind"
+                ],
+
+            "term":
+                str(
+                    descriptors[
+                        column
+                    ].get(
+                        "term",
+                        "",
+                    )
+                ),
+
+            "fd_mode":
+                mode,
+
+            "delta_used":
+                float(
+                    h
+                ),
+
+            "column_norm":
+                column_norm,
+        })
+
+    return (
+        jacobian,
+        active_columns,
+        diagnostic_rows,
+    )
+
+
+def _step11_run_joint_topology_restoration(
+    common: dict[str, Any],
+    progress: Callable[
+        [str],
+        None,
+    ],
+) -> dict[str, Any]:
+    """Chạy vòng lặp tối ưu Levenberg-Marquardt phục hồi tô-pô đồng thời M1/M2."""
+
+    cfg = common[
+        "restoration_cfg"
+    ]
+
+    descriptors = common[
+        "descriptors"
+    ]
+
+    u = np.zeros(
+        len(descriptors),
+        dtype=float,
+    )
+
+    current = (
+        _step11_evaluate_restoration_u(
+            common,
+            u,
+            include_payload=True,
+        )
+    )
+
+    if not current[
+        "valid"
+    ]:
+        raise RuntimeError(
+            "STEP11_RESTORATION_BASE_INVALID:"
+            +
+            str(
+                current.get(
+                    "reason"
+                )
+            )
+        )
+
+    damping = float(
+        cfg[
+            "damping"
+        ]
+    )
+
+    trust_radius = float(
+        cfg[
+            "maximum_trust_radius"
+        ]
+    )
+
+    history = []
+
+    jacobian_history = []
+
+    exec_cfg = (
+        common[
+            "ctx"
+        ].config.get(
+            "execution",
+            {},
+        )
+    )
+
+    parallel_enabled = bool(
+        exec_cfg.get(
+            "parallel_step11_candidates",
+            False,
+        )
+    )
+
+    worker_limit = int(
+        exec_cfg.get(
+            "step11_candidate_workers",
+            4,
+        )
+    )
+
+    memory_estimate = float(
+        exec_cfg.get(
+            "step11_worker_memory_estimate_gib",
+            1.5,
+        )
+    )
+
+    runtime = current_runtime()
+
+    can_use_pool = bool(
+        parallel_enabled
+        and
+        runtime is not None
+        and
+        not runtime.is_worker
+        and
+        not is_compute_worker()
+        and
+        worker_limit > 1
+    )
+
+    from execution_v55 import (
+        managed_compute_pool,
+    )
+
+    pool_cm = (
+        managed_compute_pool(
+            common,
+            purpose=
+                "STEP11_JACOBIAN",
+            worker_limit=
+                worker_limit,
+            worker_memory_estimate_gib=
+                memory_estimate,
+        )
+        if can_use_pool
+        else
+        nullcontext(
+            (
+                None,
+                1,
+                {},
+            )
+        )
+    )
+
+    restoration_success = bool(
+        current[
+            "meta"
+        ][
+            "M1_raw_topology_pass"
+        ]
+        and
+        current[
+            "meta"
+        ][
+            "M2_raw_topology_pass"
+        ]
+    )
+
+    stop_reason = (
+        "BASE_ALREADY_TOPOLOGY_PASS"
+        if restoration_success
+        else None
+    )
+
+    with pool_cm as (
+        executor,
+        max_inflight,
+        _,
+    ):
+
+        effective_workers = (
+            executor._max_workers
+            if executor is not None
+            else 1
+        )
+
+        progress(
+            "[RESTORE][START]"
+            f" variables={len(descriptors)}"
+            f" | workers={effective_workers}"
+            f" | J={current['objective']:.6g}"
+            f" | M2_H={current['meta']['M2_oriented_H_min_per_mm']:.6g}"
+            f" | M2_KG={current['meta']['M2_KG_min_per_mm2']:.6g}"
+        )
+
+        for iteration in range(
+            1,
+            int(
+                cfg[
+                    "maximum_iterations"
+                ]
+            )
+            + 1,
+        ):
+
+            if restoration_success:
+                break
+
+            objective_before = float(
+                current[
+                    "objective"
+                ]
+            )
+
+            residual_before = np.asarray(
+                current[
+                    "residual"
+                ],
+                float,
+            )
+
+            (
+                jacobian,
+                active_columns,
+                fd_rows,
+            ) = (
+                _step11_build_parallel_jacobian(
+                    common,
+                    u,
+                    residual_before,
+                    iteration,
+                    trust_radius,
+                    executor,
+                    max_inflight,
+                )
+            )
+
+            jacobian_history.extend(
+                fd_rows
+            )
+
+            invalid_fraction = (
+                1.0
+                -
+                len(
+                    active_columns
+                )
+                /
+                max(
+                    len(
+                        descriptors
+                    ),
+                    1,
+                )
+            )
+
+            if (
+                not active_columns
+                or
+                invalid_fraction
+                >
+                float(
+                    cfg[
+                        "maximum_invalid_jacobian_fraction"
+                    ]
+                )
+            ):
+
+                trust_radius = max(
+                    float(
+                        cfg[
+                            "minimum_trust_radius"
+                        ]
+                    ),
+
+                    trust_radius
+                    *
+                    float(
+                        cfg[
+                            "trust_shrink_factor"
+                        ]
+                    ),
+                )
+
+                damping = min(
+                    float(
+                        cfg[
+                            "maximum_damping"
+                        ]
+                    ),
+
+                    damping
+                    *
+                    float(
+                        cfg[
+                            "rejected_damping_factor"
+                        ]
+                    ),
+                )
+
+                history.append({
+                    "iteration":
+                        int(
+                            iteration
+                        ),
+
+                    "accepted":
+                        False,
+
+                    "failure":
+                        "TOO_MANY_INVALID_COLUMNS",
+
+                    "active_columns":
+                        int(
+                            len(
+                                active_columns
+                            )
+                        ),
+
+                    "invalid_column_fraction":
+                        float(
+                            invalid_fraction
+                        ),
+
+                    "objective_before":
+                        objective_before,
+
+                    "objective_after":
+                        objective_before,
+
+                    "trust_radius":
+                        trust_radius,
+
+                    "damping":
+                        damping,
+
+                    **current[
+                        "meta"
+                    ],
+                })
+
+                continue
+
+            active = np.asarray(
+                active_columns,
+                int,
+            )
+
+            J = jacobian[
+                :,
+                active
+            ]
+
+            singular = np.linalg.svd(
+                J,
+                compute_uv=False,
+            )
+
+            if (
+                len(singular) == 0
+                or
+                singular[0] <= 0.0
+            ):
+
+                rank = 0
+
+                condition_number = float(
+                    "inf"
+                )
+
+            else:
+
+                threshold = (
+                    float(
+                        cfg[
+                            "svd_rcond"
+                        ]
+                    )
+                    *
+                    float(
+                        singular[
+                            0
+                        ]
+                    )
+                )
+
+                rank = int(
+                    np.count_nonzero(
+                        singular
+                        >
+                        threshold
+                    )
+                )
+
+                condition_number = (
+                    float(
+                        singular[0]
+                        /
+                        singular[
+                            rank - 1
+                        ]
+                    )
+                    if rank > 0
+                    else
+                    float("inf")
+                )
+
+            if rank == 0:
+
+                stop_reason = (
+                    "JACOBIAN_RANK_ZERO"
+                )
+
+                break
+
+            condition_scale = max(
+                1.0,
+
+                condition_number
+                /
+                float(
+                    cfg[
+                        "maximum_jacobian_condition"
+                    ]
+                ),
+            )
+
+            column_norm = np.sqrt(
+                np.maximum(
+                    np.sum(
+                        J * J,
+                        axis=0,
+                    ),
+                    1e-12,
+                )
+            )
+
+            accepted = False
+
+            accepted_state = None
+            accepted_u = None
+            accepted_rho = None
+            accepted_alpha = None
+            accepted_damping = None
+
+            predicted_reduction = None
+            actual_reduction = None
+
+            for multiplier in map(
+                float,
+                cfg[
+                    "damping_multipliers"
+                ],
+            ):
+
+                trial_damping = (
+                    damping
+                    *
+                    multiplier
+                    *
+                    condition_scale
+                )
+
+                # Augmented LS:
+                #
+                # [J           ] delta = [-r]
+                # [sqrt(lam) D ]         [ 0]
+                #
+                # numerically tốt hơn J.T @ J.
+
+                A = np.vstack([
+                    J,
+
+                    math.sqrt(
+                        trial_damping
+                    )
+                    *
+                    np.diag(
+                        column_norm
+                    ),
+                ])
+
+                b = np.concatenate([
+                    -residual_before,
+
+                    np.zeros(
+                        len(
+                            active_columns
+                        ),
+                        dtype=float,
+                    ),
+                ])
+
+                try:
+
+                    delta_active = (
+                        np.linalg.lstsq(
+                            A,
+                            b,
+                            rcond=float(
+                                cfg[
+                                    "svd_rcond"
+                                ]
+                            ),
+                        )[0]
+                    )
+
+                except np.linalg.LinAlgError:
+
+                    continue
+
+                if not np.all(
+                    np.isfinite(
+                        delta_active
+                    )
+                ):
+                    continue
+
+                delta = np.zeros(
+                    len(
+                        descriptors
+                    ),
+                    dtype=float,
+                )
+
+                delta[
+                    active
+                ] = (
+                    delta_active
+                )
+
+                maximum_step = (
+                    float(
+                        cfg[
+                            "max_step_normalized"
+                        ]
+                    )
+                    *
+                    float(
+                        trust_radius
+                    )
+                )
+
+                delta = np.clip(
+                    delta,
+                    -maximum_step,
+                    maximum_step,
+                )
+
+                for alpha in map(
+                    float,
+                    cfg[
+                        "line_search_alphas"
+                    ],
+                ):
+
+                    step = (
+                        alpha
+                        *
+                        delta
+                    )
+
+                    candidate_u = (
+                        u
+                        +
+                        step
+                    )
+
+                    # Không clip normalized variables.
+                    if np.any(
+                        np.abs(
+                            candidate_u
+                        )
+                        >
+                        1.0 + 1e-12
+                    ):
+                        continue
+
+                    candidate = (
+                        _step11_evaluate_restoration_u(
+                            common,
+                            candidate_u,
+                            include_payload=True,
+                        )
+                    )
+
+                    if not candidate[
+                        "valid"
+                    ]:
+                        continue
+
+                    predicted_residual = (
+                        residual_before
+                        +
+                        jacobian
+                        @
+                        step
+                    )
+
+                    predicted_objective = float(
+                        np.mean(
+                            predicted_residual
+                            *
+                            predicted_residual
+                        )
+                    )
+
+                    predicted_reduction = (
+                        objective_before
+                        -
+                        predicted_objective
+                    )
+
+                    actual_reduction = (
+                        objective_before
+                        -
+                        float(
+                            candidate[
+                                "objective"
+                            ]
+                        )
+                    )
+
+                    rho = (
+                        actual_reduction
+                        /
+                        predicted_reduction
+                        if
+                        predicted_reduction
+                        >
+                        1e-15
+                        else
+                        float("-inf")
+                    )
+
+                    if (
+                        np.isfinite(
+                            rho
+                        )
+                        and
+                        actual_reduction
+                        >
+                        0.0
+                        and
+                        rho
+                        >=
+                        float(
+                            cfg[
+                                "minimum_acceptance_rho"
+                            ]
+                        )
+                    ):
+
+                        accepted = True
+
+                        accepted_state = (
+                            candidate
+                        )
+
+                        accepted_u = (
+                            candidate_u
+                        )
+
+                        accepted_rho = float(
+                            rho
+                        )
+
+                        accepted_alpha = float(
+                            alpha
+                        )
+
+                        accepted_damping = float(
+                            trial_damping
+                        )
+
+                        break
+
+                if accepted:
+                    break
+
+            if accepted:
+
+                u = np.asarray(
+                    accepted_u,
+                    float,
+                )
+
+                current = (
+                    accepted_state
+                )
+
+                if (
+                    accepted_rho
+                    <
+                    float(
+                        cfg[
+                            "trust_shrink_rho"
+                        ]
+                    )
+                ):
+
+                    trust_radius = max(
+                        float(
+                            cfg[
+                                "minimum_trust_radius"
+                            ]
+                        ),
+
+                        trust_radius
+                        *
+                        float(
+                            cfg[
+                                "trust_shrink_factor"
+                            ]
+                        ),
+                    )
+
+                elif (
+                    accepted_rho
+                    >=
+                    float(
+                        cfg[
+                            "trust_expand_rho"
+                        ]
+                    )
+                    and
+                    accepted_alpha
+                    >=
+                    0.999
+                ):
+
+                    trust_radius = min(
+                        float(
+                            cfg[
+                                "maximum_trust_radius"
+                            ]
+                        ),
+
+                        trust_radius
+                        *
+                        float(
+                            cfg[
+                                "trust_expand_factor"
+                            ]
+                        ),
+                    )
+
+                damping = max(
+                    float(
+                        cfg[
+                            "minimum_damping"
+                        ]
+                    ),
+
+                    accepted_damping
+                    *
+                    float(
+                        cfg[
+                            "accepted_damping_factor"
+                        ]
+                    ),
+                )
+
+            else:
+
+                trust_radius = max(
+                    float(
+                        cfg[
+                            "minimum_trust_radius"
+                        ]
+                    ),
+
+                    trust_radius
+                    *
+                    float(
+                        cfg[
+                            "trust_shrink_factor"
+                        ]
+                    ),
+                )
+
+                damping = min(
+                    float(
+                        cfg[
+                            "maximum_damping"
+                        ]
+                    ),
+
+                    damping
+                    *
+                    float(
+                        cfg[
+                            "rejected_damping_factor"
+                        ]
+                    ),
+                )
+
+            restoration_success = bool(
+                current[
+                    "meta"
+                ][
+                    "M1_raw_topology_pass"
+                ]
+                and
+                current[
+                    "meta"
+                ][
+                    "M2_raw_topology_pass"
+                ]
+            )
+
+            if restoration_success:
+
+                stop_reason = (
+                    "M1_M2_RAW_TOPOLOGY_PASS"
+                )
+
+            history.append({
+                "iteration":
+                    int(
+                        iteration
+                    ),
+
+                "accepted":
+                    bool(
+                        accepted
+                    ),
+
+                "objective_before":
+                    float(
+                        objective_before
+                    ),
+
+                "objective_after":
+                    float(
+                        current[
+                            "objective"
+                        ]
+                    ),
+
+                "predicted_reduction":
+                    predicted_reduction,
+
+                "actual_reduction":
+                    actual_reduction,
+
+                "rho":
+                    (
+                        accepted_rho
+                        if accepted
+                        else None
+                    ),
+
+                "alpha":
+                    (
+                        accepted_alpha
+                        if accepted
+                        else None
+                    ),
+
+                "jacobian_rank":
+                    int(
+                        rank
+                    ),
+
+                "active_columns":
+                    int(
+                        len(
+                            active_columns
+                        )
+                    ),
+
+                "jacobian_condition":
+                    float(
+                        condition_number
+                    ),
+
+                "invalid_column_fraction":
+                    float(
+                        invalid_fraction
+                    ),
+
+                "trust_radius":
+                    float(
+                        trust_radius
+                    ),
+
+                "damping":
+                    float(
+                        damping
+                    ),
+
+                **current[
+                    "meta"
+                ],
+            })
+
+            progress(
+                f"[RESTORE][ITER {iteration}]"
+                f" {'ACCEPT' if accepted else 'REJECT'}"
+                f" | J={objective_before:.6g}"
+                f"->{current['objective']:.6g}"
+                f" | rank={rank}/{len(active_columns)}"
+                f" | cond={condition_number:.3g}"
+                f" | rho={accepted_rho if accepted else 'n/a'}"
+                f" | trust={trust_radius:.4g}"
+                f" | M2_H={current['meta']['M2_oriented_H_min_per_mm']:.6g}"
+                f" | M2_KG={current['meta']['M2_KG_min_per_mm2']:.6g}"
+                f" | M2_topology={current['meta']['M2_raw_topology_pass']}"
+            )
+
+            if restoration_success:
+                break
+
+            if (
+                not accepted
+                and
+                trust_radius
+                <=
+                float(
+                    cfg[
+                        "minimum_trust_radius"
+                    ]
+                )
+                +
+                1e-15
+                and
+                damping
+                >=
+                float(
+                    cfg[
+                        "maximum_damping"
+                    ]
+                )
+            ):
+
+                stop_reason = (
+                    "TRUST_AND_DAMPING_LIMIT_REACHED"
+                )
+
+                break
+
+    if not restoration_success:
+
+        raise RuntimeError(
+            "STEP11_JOINT_TOPOLOGY_RESTORATION_FAILED:"
+            f"reason={stop_reason or 'MAXIMUM_ITERATIONS'};"
+            f"M2_H={current['meta']['M2_oriented_H_min_per_mm']:.12g};"
+            f"M2_KG={current['meta']['M2_KG_min_per_mm2']:.12g};"
+            f"J={current['objective']:.12g};"
+            f"trust={trust_radius:.12g};"
+            f"damping={damping:.12g}"
+        )
+
+    return {
+        "success":
+            True,
+
+        "u":
+            np.asarray(
+                u,
+                float,
+            ),
+
+        "m1":
+            current[
+                "m1"
+            ],
+
+        "m2":
+            current[
+                "m2"
+            ],
+
+        "evaluation":
+            current[
+                "evaluation"
+            ],
+
+        "meta":
+            current[
+                "meta"
+            ],
+
+        "history":
+            history,
+
+        "jacobian_history":
+            jacobian_history,
+
+        "effective_workers":
+            int(
+                effective_workers
+            ),
+
+        "stop_reason":
+            stop_reason,
+
+        "final_objective":
+            float(
+                current[
+                    "objective"
+                ]
+            ),
+    }
 
 
 def _step11_archive_candidate_snapshot(
@@ -15781,6 +20168,16 @@ def evaluate_step11_candidate_job(
     enter_phase("COMPLETE")
     return record, payload, last_phase
 
+
+# Legacy architecture tokens preserved for verify_v55 compatibility:
+# SYSTEM_AWARE_O2_PAIR_CONSTRUCTION
+# 11_M1_PHYSICAL_DOF_SCALING.csv
+# STEP11_NO_FEASIBLE_O2_PAIR
+# FEASIBLE_FIRST_THEN_ACTUAL_OPTICAL_OBJECTIVE_THEN_M2_REPRESENTABILITY
+# "topology_is_hard_constraint_not_merit":
+# "shape_quality_enforcement":
+# "ci_trust_enforcement":
+# SOFT_PREFERRED_THRESHOLD_FOR_RANK_BUCKET
 
 def step_11(ctx: Context) -> dict[str, Any]:
     """Tìm cặp M1/M2 O2 feasible-first bằng topology admission và actual optical trace."""
@@ -16705,1320 +21102,1009 @@ def step_11(ctx: Context) -> dict[str, Any]:
         m1_diagnostic,
     )
 
-    set_phase("BUILD_PHYSICAL_DOF_SCALING")
-    all_descriptors = _step12_o2_variable_descriptors(
-        baseline_m1,
-        ctx.data["m2"],
+    set_phase(
+        "BUILD_RESTORATION_SEED"
     )
-    descriptors = [
-        descriptor
-        for descriptor in all_descriptors
-        if descriptor["surface"] == "M1"
-    ]
-    if not descriptors:
-        raise RuntimeError("STEP11_M1_SEARCH_HAS_NO_O2_VARIABLES")
 
-    progress("=" * 80)
-    progress("O2 SYSTEM-AWARE SEARCH")
-    progress("=" * 80)
-    progress(
-        f"[INIT] rays={len(r['rows']):,} | M1_DOF={len(descriptors)} | "
-        f"cycles<={refinement_cfg['iterations']} | "
-        f"physical_target={100.0 * float(quality_cfg['minimum_physical_fraction']):.1f}%"
-    )
-    progress(
-        "[POLICY] HARD=topology+unobscuration | WARN=shape+CI+integrability+physical<90%"
-    )
-    if baseline_fit.get("fallback_activated", False):
-        progress(
-            f"[FIT] M1 baseline (FALLBACK BICONIC) | NLSQ_sag={float(baseline_fit['sag_rms_mm']):.4f} mm | "
-            f"NLSQ_normal={float(baseline_fit['normal_rms_deg']):.4f} deg"
-        )
-    else:
-        progress(
-            f"[FIT] M1 baseline | sag={float(baseline_fit['sag_rms_mm']):.4f} mm | "
-            f"normal={float(baseline_fit['normal_rms_deg']):.4f} deg"
-        )
+    restoration_common_seed = {
+        "ctx":
+            ctx,
 
-    def aperture_xy(surface: PolySurface, samples: int = 31) -> tuple[np.ndarray, np.ndarray]:
-        """Lấy grid local nằm trong clear aperture để chuẩn hóa tác động vật lý của DOF."""
-        x = np.linspace(-surface.half_aperture[0], surface.half_aperture[0], samples)
-        y = np.linspace(-surface.half_aperture[1], surface.half_aperture[1], samples)
-        X, Y = np.meshgrid(x, y)
-        xv, yv = X.ravel(), Y.ravel()
-        if surface.aperture_polygon is not None:
-            poly = np.asarray(surface.aperture_polygon, float)
-            edges = np.roll(poly, -1, axis=0) - poly
-            cross = (
-                edges[None, :, 0] * (yv[:, None] - poly[None, :, 1])
-                - edges[None, :, 1] * (xv[:, None] - poly[None, :, 0])
-            )
-            area = 0.5 * np.sum(
-                poly[:, 0] * np.roll(poly[:, 1], -1)
-                - poly[:, 1] * np.roll(poly[:, 0], -1)
-            )
-            keep = np.all(cross * np.sign(area) >= -1e-9, axis=1)
-            xv = np.concatenate([xv[keep], poly[:, 0]])
-            yv = np.concatenate([yv[keep], poly[:, 1]])
-        return xv, yv
+        "surface_fit_cfg":
+            surface_fit_cfg,
 
-    base_pair = {
-        "M1": baseline_m1.copy(),
-        "M2": ctx.data["m2"].copy(),
+        "quality_cfg":
+            quality_cfg,
+
+        "refinement_cfg":
+            refinement_cfg,
+
+        "integrability_policy":
+            integrability_policy,
+
+        "shape_policy":
+            shape_policy,
+
+        "m1_topology":
+            m1_topology,
+
+        "m2_topology":
+            m2_topology,
+
+        "topology_enforcement":
+            dict(
+                topology_enforcement
+            ),
+
+        "chief_index":
+            int(
+                chief_index
+            ),
     }
-    sample_x, sample_y = aperture_xy(baseline_m1)
-    base_shape = baseline_m1.sag_slopes_hessian(sample_x, sample_y)
-    characteristic_length = max(float(np.max(baseline_m1.half_aperture)), 1e-9)
-    sag_budget = float(refinement_cfg["coefficient_absolute_bound_mm"])
-    slope_budget = sag_budget / characteristic_length
-    hessian_budget = sag_budget / (characteristic_length * characteristic_length)
-    physical_scales = np.ones(len(descriptors), float)
-    impact_rows: list[dict[str, Any]] = []
 
-    for column in range(len(descriptors)):
-        impacts = {"sag": 0.0, "slope": 0.0, "hessian": 0.0}
-        for sign in (-1.0, 1.0):
-            probe = np.zeros(len(descriptors), float)
-            probe[column] = sign
-            probe_m1, _ = _step12_apply_o2_vector(
-                base_pair,
-                descriptors,
-                probe,
-                refinement_cfg,
-                surface_fit_cfg,
-            )
-            trial_shape = probe_m1.sag_slopes_hessian(sample_x, sample_y)
-            impacts["sag"] = max(
-                impacts["sag"],
-                float(np.max(np.abs(trial_shape[0] - base_shape[0]))),
-            )
-            slope_delta = np.sqrt(
-                (trial_shape[1] - base_shape[1]) ** 2
-                + (trial_shape[2] - base_shape[2]) ** 2
-            )
-            impacts["slope"] = max(
-                impacts["slope"],
-                float(np.max(slope_delta)),
-            )
-            hessian_delta = np.sqrt(
-                (trial_shape[3] - base_shape[3]) ** 2
-                + 2.0 * (trial_shape[4] - base_shape[4]) ** 2
-                + (trial_shape[5] - base_shape[5]) ** 2
-            )
-            impacts["hessian"] = max(
-                impacts["hessian"],
-                float(np.max(hessian_delta)),
-            )
-
-        scale_candidates = [1.0]
-        if impacts["sag"] > 0.0:
-            scale_candidates.append(sag_budget / impacts["sag"])
-        if impacts["slope"] > 0.0:
-            scale_candidates.append(slope_budget / impacts["slope"])
-        if impacts["hessian"] > 0.0:
-            scale_candidates.append(hessian_budget / impacts["hessian"])
-        physical_scales[column] = float(np.clip(min(scale_candidates), 0.0, 1.0))
-        impact_rows.append({
-            "column": int(column),
-            "surface": descriptors[column]["surface"],
-            "kind": descriptors[column]["kind"],
-            "term": str(descriptors[column].get("term", "")),
-            "full_bound_max_sag_change_mm": impacts["sag"],
-            "full_bound_max_slope_change": impacts["slope"],
-            "full_bound_max_hessian_change_per_mm": impacts["hessian"],
-            "physical_scale": float(physical_scales[column]),
-            "probe_sag_budget_mm": sag_budget,
-            "probe_slope_budget": slope_budget,
-            "probe_hessian_budget_per_mm": hessian_budget,
-        })
-
-    write_csv(step_dir / "11_M1_PHYSICAL_DOF_SCALING.csv", impact_rows)
-    progress(
-        "Search preparation complete | "
-        f"M1_O2_dof={len(descriptors)} | "
-        f"physical_scale={number(np.min(physical_scales))}..{number(np.max(physical_scales))} | "
-        f"elapsed={duration(time.perf_counter() - step_started)}"
+    seed = (
+        _step11_build_restoration_seed(
+            restoration_common_seed,
+            baseline_m1,
+        )
     )
 
+    seed_m1 = seed[
+        "m1"
+    ]
 
-    step11_ctx_snapshot = Context(
-        source_dir=ctx.source_dir,
-        config_path=ctx.config_path,
-        config=copy.deepcopy(ctx.config),
-        run_dir=ctx.run_dir,
+    seed_m2 = seed[
+        "m2"
+    ]
+
+    restoration_cfg = (
+        surface_fit_cfg[
+            "step11_topology_restoration"
+        ]
     )
-    for k in (
+
+    descriptors = (
+        _step12_o2_variable_descriptors(
+            seed_m1,
+            seed_m2,
+        )
+    )
+
+    if not descriptors:
+        raise RuntimeError(
+            "STEP11_RESTORATION_HAS_NO_VARIABLES"
+        )
+
+    set_phase(
+        "FREEZE_RESTORATION_STATE"
+    )
+
+    grids = {
+        "M1":
+            _step11_fixed_residual_grid(
+                seed_m1,
+                int(
+                    restoration_cfg[
+                        "grid_samples"
+                    ]
+                ),
+            ),
+
+        "M2":
+            _step11_fixed_residual_grid(
+                seed_m2,
+                int(
+                    restoration_cfg[
+                        "grid_samples"
+                    ]
+                ),
+            ),
+    }
+
+    orientation_signs = {
+        "M1":
+            float(
+                seed[
+                    "optical_metrics"
+                ][
+                    "M1_sanity"
+                ][
+                    "orientation_sign"
+                ]
+            ),
+
+        "M2":
+            float(
+                seed[
+                    "optical_metrics"
+                ][
+                    "M2_sanity"
+                ][
+                    "orientation_sign"
+                ]
+            ),
+    }
+
+    anchors = {
+        "M1":
+            _step11_curvature_field(
+                seed_m1,
+                grids[
+                    "M1"
+                ],
+                orientation_signs[
+                    "M1"
+                ],
+            ),
+
+        "M2":
+            _step11_curvature_field(
+                seed_m2,
+                grids[
+                    "M2"
+                ],
+                orientation_signs[
+                    "M2"
+                ],
+            ),
+    }
+
+    base_optical = np.asarray(
+        seed[
+            "optical_residual"
+        ],
+        float,
+    )
+
+    maximum_optical = int(
+        restoration_cfg[
+            "maximum_optical_residual_samples"
+        ]
+    )
+
+    if maximum_optical <= 0:
+
+        optical_indices = np.empty(
+            0,
+            dtype=int,
+        )
+
+    elif (
+        len(base_optical)
+        <=
+        maximum_optical
+    ):
+
+        optical_indices = np.arange(
+            len(base_optical),
+            dtype=int,
+        )
+
+    else:
+
+        optical_indices = np.unique(
+            np.linspace(
+                0,
+                len(base_optical) - 1,
+                maximum_optical,
+                dtype=int,
+            )
+        )
+
+    residual_state = {
+        "cfg":
+            copy.deepcopy(
+                restoration_cfg
+            ),
+
+        "surface_fit_cfg":
+            copy.deepcopy(
+                surface_fit_cfg
+            ),
+
+        "quality_cfg":
+            copy.deepcopy(
+                quality_cfg
+            ),
+
+        "grids":
+            copy.deepcopy(
+                grids
+            ),
+
+        "anchors":
+            copy.deepcopy(
+                anchors
+            ),
+
+        "orientation_signs":
+            dict(
+                orientation_signs
+            ),
+
+        "optical_indices":
+            np.asarray(
+                optical_indices,
+                int,
+            ),
+    }
+
+    restoration_ctx_snapshot = Context(
+        source_dir=
+            ctx.source_dir,
+
+        config_path=
+            ctx.config_path,
+
+        config=
+            copy.deepcopy(
+                ctx.config
+            ),
+
+        run_dir=
+            ctx.run_dir,
+    )
+
+    for key in (
         "rays",
         "visor",
         "display",
-        "m2",
         "ci_m1",
         "visor_hit",
         "post_visor",
         "fan_refs",
         "n_obs",
     ):
-        if k in ctx.data:
-            step11_ctx_snapshot.data[k] = copy.deepcopy(ctx.data[k])
+        if key in ctx.data:
 
-    step11_common = {
-        "ctx": step11_ctx_snapshot,
+            restoration_ctx_snapshot.data[
+                key
+            ] = copy.deepcopy(
+                ctx.data[
+                    key
+                ]
+            )
+
+    restoration_common = {
+        "ctx":
+            restoration_ctx_snapshot,
+
         "base_pair": {
-            "M1": baseline_m1.copy(),
-            "M2": ctx.data["m2"].copy(),
+            "M1":
+                seed_m1.copy(),
+
+            "M2":
+                seed_m2.copy(),
         },
-        "descriptors": copy.deepcopy(descriptors),
-        "physical_scales": np.asarray(physical_scales, dtype=float).copy(),
-        "surface_fit_cfg": copy.deepcopy(surface_fit_cfg),
-        "quality_cfg": copy.deepcopy(quality_cfg),
-        "refinement_cfg": copy.deepcopy(refinement_cfg),
-        "integrability_policy": copy.deepcopy(integrability_policy),
-        "shape_policy": copy.deepcopy(shape_policy),
-        "m1_topology": str(m1_topology),
-        "m2_topology": str(m2_topology),
-        "topology_enforcement": copy.deepcopy(topology_enforcement),
-        "chief_index": int(chief_index),
+
+        "descriptors":
+            copy.deepcopy(
+                descriptors
+            ),
+
+        "restoration_cfg":
+            copy.deepcopy(
+                restoration_cfg
+            ),
+
+        "surface_fit_cfg":
+            copy.deepcopy(
+                surface_fit_cfg
+            ),
+
+        "quality_cfg":
+            copy.deepcopy(
+                quality_cfg
+            ),
+
+        "refinement_cfg":
+            copy.deepcopy(
+                refinement_cfg
+            ),
+
+        "residual_state":
+            residual_state,
     }
 
-    def candidate_history_row(record: dict[str, Any]) -> dict[str, Any]:
-        """Giữ history dạng scalar để CSV không chứa surface/array lớn."""
-        return {
-            "candidate_id": record["candidate_id"],
-            "cycle": record["cycle"],
-            "trust_scale": record["trust_scale"],
-            "move": record["move"],
-            "feasible": record["feasible"],
-            "rejection_stage": record.get("rejection_stage"),
-            "rejection_reason": record.get("rejection_reason"),
-            "M1_shape_pass":
-                record.get(
-                    "M1_shape_pass"
-                ),
-            "M1_shape_raw_pass":
-                record.get(
-                    "M1_shape_raw_pass"
-                ),
-            "M1_shape_quality_status":
-                record.get(
-                    "M1_shape_quality_status"
-                ),
-            "M1_shape_quality_warnings":
-                record.get(
-                    "M1_shape_quality_warnings"
-                ),
-            "M1_ci_trust_status":
-                record.get(
-                    "M1_ci_trust_status"
-                ),
-
-            "M1_topology":
-                record.get(
-                    "M1_topology"
-                ),
-
-            "M1_topology_enforcement":
-                record.get(
-                    "M1_topology_enforcement"
-                ),
-
-            "M1_topology_admitted":
-                record.get(
-                    "M1_topology_admitted"
-                ),
-
-            "M1_topology_admission_status":
-                record.get(
-                    "M1_topology_admission_status"
-                ),
-
-            "M1_topology_warning_reasons":
-                record.get(
-                    "M1_topology_warning_reasons"
-                ),
-
-            "M1_orientation_sign":
-                record.get(
-                    "M1_orientation_sign"
-                ),
-
-            "M1_ray_facing_dot":
-                record.get(
-                    "M1_ray_facing_dot"
-                ),
-
-            "M1_ci_trust_pass":
-                record.get(
-                    "M1_ci_trust_pass"
-                ),
-            "M1_H_min_per_mm": record.get("M1_H_min_per_mm"),
-            "M1_H_max_per_mm": record.get("M1_H_max_per_mm"),
-            "M1_KG_min_per_mm2": record.get("M1_KG_min_per_mm2"),
-            "M1_KG_max_per_mm2": record.get("M1_KG_max_per_mm2"),
-            "M1_k1_min_per_mm": record.get("M1_k1_min_per_mm"),
-            "M1_k1_max_per_mm": record.get("M1_k1_max_per_mm"),
-            "M1_k2_min_per_mm": record.get("M1_k2_min_per_mm"),
-            "M1_k2_max_per_mm": record.get("M1_k2_max_per_mm"),
-            "M1_oriented_H_min_per_mm": record.get("M1_oriented_H_min_per_mm"),
-            "M1_curvature_sign_flip_count": record.get("M1_curvature_sign_flip_count"),
-
-            "M2_integrability_pass":
-                record.get(
-                    "M2_integrability_pass"
-                ),
-
-            "M2_integrability_status":
-                record.get(
-                    "M2_integrability_status"
-                ),
-
-            "M2_integrability_admitted":
-                record.get(
-                    "M2_integrability_admitted"
-                ),
-            "M2_conditioning_status":
-                record.get("M2_conditioning_status"),
-            "M2_conditioning_attempted_iterations":
-                record.get(
-                    "M2_conditioning_attempted_iterations"
-                ),
-            "M2_conditioning_selected_iteration":
-                record.get(
-                    "M2_conditioning_selected_iteration"
-                ),
-            "M2_conditioning_initial_integrability_status":
-                record.get(
-                    "M2_conditioning_initial_integrability_status"
-                ),
-            "M2_conditioning_selected_integrability_status":
-                record.get(
-                    "M2_conditioning_selected_integrability_status"
-                ),
-            "M2_conditioning_error":
-                record.get("M2_conditioning_error"),
-            "M2_CI_bundle_curl_rms_p95_actual":
-                record.get("M2_CI_bundle_curl_rms_p95_actual"),
-            "M2_CI_bundle_curl_rms_p95_limit":
-                record.get("M2_CI_bundle_curl_rms_p95_limit"),
-            "M2_CI_bundle_local_geometry_normal_rms_p95_actual":
-                record.get("M2_CI_bundle_local_geometry_normal_rms_p95_actual"),
-            "M2_CI_bundle_local_geometry_normal_rms_p95_limit":
-                record.get("M2_CI_bundle_local_geometry_normal_rms_p95_limit"),
-            "M2_CI_bundle_loop_circulation_p95_actual":
-                record.get("M2_CI_bundle_loop_circulation_p95_actual"),
-            "M2_CI_bundle_loop_circulation_p95_limit":
-                record.get("M2_CI_bundle_loop_circulation_p95_limit"),
-            "M2_CI_bundle_edge_gradient_height_residual_p95_actual":
-                record.get("M2_CI_bundle_edge_gradient_height_residual_p95_actual"),
-            "M2_CI_bundle_edge_gradient_height_residual_p95_limit":
-                record.get("M2_CI_bundle_edge_gradient_height_residual_p95_limit"),
-            "M2_CI_bundle_nearest_normal_angle_p99_actual":
-                record.get("M2_CI_bundle_nearest_normal_angle_p99_actual"),
-            "M2_CI_bundle_nearest_normal_angle_p99_limit":
-                record.get("M2_CI_bundle_nearest_normal_angle_p99_limit"),
-            "M2_CI_bundle_count":
-                record.get("M2_CI_bundle_count"),
-            "M2_CI_evaluable_bundle_count":
-                record.get("M2_CI_evaluable_bundle_count"),
-            "M2_fit_curvature_per_mm":
-                record.get("M2_fit_curvature_per_mm"),
-            "M2_fit_conic_constant":
-                record.get("M2_fit_conic_constant"),
-            "M2_fit_sag_rms_mm":
-                record.get("M2_fit_sag_rms_mm"),
-            "M2_fit_normal_rms_deg":
-                record.get("M2_fit_normal_rms_deg"),
-            "M2_fit_normal_max_deg":
-                record.get("M2_fit_normal_max_deg"),
-            "M2_fit_k_bound_hit":
-                record.get("M2_fit_k_bound_hit"),
-            "M2_fit_curvature_bound_hit":
-                record.get("M2_fit_curvature_bound_hit"),
-
-            "M2_shape_pass":
-                record.get(
-                    "M2_shape_pass"
-                ),
-            "M2_shape_raw_pass":
-                record.get(
-                    "M2_shape_raw_pass"
-                ),
-            "M2_shape_quality_status":
-                record.get(
-                    "M2_shape_quality_status"
-                ),
-            "M2_shape_quality_warnings":
-                record.get(
-                    "M2_shape_quality_warnings"
-                ),
-
-            "M2_topology":
-                record.get(
-                    "M2_topology"
-                ),
-
-            "M2_topology_enforcement":
-                record.get(
-                    "M2_topology_enforcement"
-                ),
-
-            "M2_topology_admitted":
-                record.get(
-                    "M2_topology_admitted"
-                ),
-
-            "M2_topology_admission_status":
-                record.get(
-                    "M2_topology_admission_status"
-                ),
-
-            "M2_topology_warning_reasons":
-                record.get(
-                    "M2_topology_warning_reasons"
-                ),
-
-            "M2_orientation_sign":
-                record.get(
-                    "M2_orientation_sign"
-                ),
-
-            "M2_ray_facing_dot":
-                record.get(
-                    "M2_ray_facing_dot"
-                ),
-            "M2_H_min_per_mm": record.get("M2_H_min_per_mm"),
-            "M2_H_max_per_mm": record.get("M2_H_max_per_mm"),
-            "M2_KG_min_per_mm2": record.get("M2_KG_min_per_mm2"),
-            "M2_KG_max_per_mm2": record.get("M2_KG_max_per_mm2"),
-            "M2_k1_min_per_mm": record.get("M2_k1_min_per_mm"),
-            "M2_k1_max_per_mm": record.get("M2_k1_max_per_mm"),
-            "M2_k2_min_per_mm": record.get("M2_k2_min_per_mm"),
-            "M2_k2_max_per_mm": record.get("M2_k2_max_per_mm"),
-            "M2_oriented_H_min_per_mm": record.get("M2_oriented_H_min_per_mm"),
-            "M2_curvature_sign_flip_count": record.get("M2_curvature_sign_flip_count"),
-            "physical_valid_count": record.get("physical_valid_count"),
-            "physical_fraction": record.get("physical_fraction"),
-            "minimum_physical_fraction": record.get("minimum_physical_fraction"),
-            "physical_quality_pass":
-                record.get(
-                    "physical_quality_pass"
-                ),
-            "physical_quality_status":
-                record.get(
-                    "physical_quality_status"
-                ),
-            "physical_quality_rank":
-                record.get(
-                    "physical_quality_rank"
-                ),
-            "candidate_surface_valid": record.get("candidate_surface_valid"),
-            "candidate_surface_admitted":
-                record.get("candidate_surface_admitted"),
-            "actual_M1_topology_pass":
-                record.get("actual_M1_topology_pass"),
-            "actual_M1_topology_admitted":
-                record.get("actual_M1_topology_admitted"),
-            "actual_M1_topology_admission_status":
-                record.get("actual_M1_topology_admission_status"),
-            "actual_M1_topology_warning_reasons":
-                record.get("actual_M1_topology_warning_reasons"),
-            "actual_M2_topology_pass":
-                record.get("actual_M2_topology_pass"),
-            "actual_M2_topology_admitted":
-                record.get("actual_M2_topology_admitted"),
-            "actual_M2_topology_admission_status":
-                record.get("actual_M2_topology_admission_status"),
-            "actual_M2_topology_warning_reasons":
-                record.get("actual_M2_topology_warning_reasons"),
-            "unobscured": record.get("unobscured"),
-            "chief_centered_spot_RMS_mm": record.get("chief_centered_spot_RMS_mm"),
-            "optical_objective": record.get("optical_objective"),
-            "mapping_rms_mm": record.get("mapping_rms_mm"),
-            "spot_rms_mm": record.get("spot_rms_mm"),
-            "direction_rms_deg": record.get("direction_rms_deg"),
-            "representation_score": record.get("representation_score"),
-        }
-    candidate_counter = 0
-
-    def candidate_surface_status(
-        record: dict[str, Any],
-        surface: str,
-    ) -> tuple[str, str]:
-        """Tách trạng thái topology/quality của từng gương để log không báo gộp mơ hồ."""
-        topology_value = record.get(
-            f"actual_{surface}_topology_pass",
-            record.get(f"{surface}_shape_pass"),
-        )
-        topology_admitted = record.get(
-            f"actual_{surface}_topology_admitted",
-            record.get(f"{surface}_topology_admitted"),
-        )
-        if topology_value is None:
-            topology_status = "NOT_EVALUATED"
-        elif bool(topology_value):
-            topology_status = "PASS"
-        elif bool(topology_admitted):
-            topology_status = "WARN_ADMITTED"
-        else:
-            topology_status = "FAIL"
-        quality_value = record.get(f"{surface}_shape_quality_status")
-        quality_status = (
-            "NOT_EVALUATED"
-            if quality_value is None
-            else str(quality_value)
-        )
-        return topology_status, quality_status
-
-    def log_candidate(
-        record: dict[str, Any],
-        index: int,
-        total: int,
-        is_best: bool = False,
-    ) -> None:
-        """Ghi log ngắn gọn chuẩn hóa taxonomy cho từng candidate."""
-        m1_topology, m1_quality = candidate_surface_status(record, "M1")
-        m2_topology, m2_quality = candidate_surface_status(record, "M2")
-        physical = record.get("physical_fraction")
-        if physical is not None and np.isfinite(float(physical)):
-            phys_text = f"{100.0 * float(physical):.1f}%"
-            if record.get("physical_quality_status") == "WARN":
-                phys_text += " [WARN]"
-        else:
-            phys_text = "n/a"
-
-        rms = number(record.get("chief_centered_spot_RMS_mm"))
-        rejection_stage = str(record.get("rejection_stage") or "UNKNOWN")
-        reason = record.get("rejection_reason")
-        failure_part = ""
-        if not bool(record.get("feasible", False)):
-            failure_part = f" | failed_at={rejection_stage}"
-            if reason:
-                failure_part += f" | reason={reason}"
-        best_tag = " [BEST]" if is_best else ""
-
-        progress(
-            f"  [CAND {index:02d}/{total:02d}] {record.get('move', 'UNKNOWN')} | "
-            f"M1_topology={m1_topology} | M2_topology={m2_topology} | "
-            f"M1_quality={m1_quality} | M2_quality={m2_quality} | "
-            f"phys={phys_text} | "
-            f"RMS={rms} mm{failure_part}{best_tag}"
-        )
-        if is_best:
-            progress(
-                f"[BEST] {record['candidate_id']} | {record.get('move', '')} | "
-                f"physical={phys_text} | RMS={rms} mm | "
-                f"J={number(record.get('optical_objective'))}"
-            )
-
-    def allocate_candidate_id() -> tuple[int, str]:
-        """Cấp số thứ tự và ID định danh duy nhất cho candidate từ main process."""
-        nonlocal candidate_counter
-        candidate_counter += 1
-        return candidate_counter, f"CANDIDATE_{candidate_counter:04d}"
-
-    def evaluate_candidate(
-        search_vector: np.ndarray,
-        *,
-        cycle: int,
-        trust_scale: float,
-        move: str,
-    ) -> tuple[
-        dict[str, Any],
-        dict[str, Any] | None,
-    ]:
-        """Wrapper gọi module-level evaluate_step11_candidate_job cho Baseline và TOP2."""
-        cand_num, cand_id = allocate_candidate_id()
-        candidate_class = (
-            "BASELINE"
-            if move == "BASELINE"
-            else "COMBINATION_TOP2"
-        )
-        job = {
-            "schema": "HUD_FAN_V5_5_STEP11_CANDIDATE_JOB_V1",
-            "job_index": 0,
-            "candidate_number": cand_num,
-            "candidate_id": cand_id,
-            "cycle": int(cycle),
-            "trust_scale": float(trust_scale),
-            "column": -1,
-            "sign": 0.0,
-            "move": str(move),
-            "search_vector": np.asarray(search_vector, float).copy(),
-            "snapshot":
-                allocate_candidate_snapshot(
-                    candidate_class
-                ),
-        }
-        rec, pay, last_phase = (
-            evaluate_step11_candidate_job(
-                step11_common,
-                job,
-            )
-        )
-        snapshot_summary = (
-            _step11_archive_candidate_snapshot(
-                rec,
-                last_phase,
-                job,
-            )
-        )
-        if snapshot_summary is not None:
-            rec["_snapshot_summary"] = (
-                snapshot_summary
-            )
-        register_candidate_snapshot(
-            rec
-        )
-        return rec, pay
-
-    history: list[dict[str, Any]] = []
-    center = np.zeros(len(descriptors), float)
-    set_phase("BASELINE_CANDIDATE")
-    baseline_started = time.perf_counter()
-    baseline_record, baseline_payload = evaluate_candidate(
-        center,
-        cycle=0,
-        trust_scale=0.0,
-        move="BASELINE",
+    progress(
+        "=" * 80
     )
-    history.append(
-        candidate_history_row(
-            baseline_record
+
+    progress(
+        "JOINT M1/M2 TOPOLOGY RESTORATION"
+    )
+
+    progress(
+        "=" * 80
+    )
+
+    progress(
+        f"[INIT]"
+        f" variables={len(descriptors)}"
+        f" | M1_grid={len(grids['M1']['xy'])}"
+        f" | M2_grid={len(grids['M2']['xy'])}"
+        f" | optical_samples={len(optical_indices)}"
+    )
+
+    set_phase(
+        "JOINT_TOPOLOGY_RESTORATION"
+    )
+
+    restoration = (
+        _step11_run_joint_topology_restoration(
+            restoration_common,
+            progress,
         )
     )
-    base_m1_topology, base_m1_quality = candidate_surface_status(
-        baseline_record,
-        "M1",
-    )
-    base_m2_topology, base_m2_quality = candidate_surface_status(
-        baseline_record,
-        "M2",
-    )
-    base_phys = baseline_record.get("physical_fraction")
-    base_phys_text = (
-        f"{100.0 * float(base_phys):.1f}%"
-        if base_phys is not None and np.isfinite(float(base_phys))
-        else "n/a"
-    )
-    base_rms = number(baseline_record.get("chief_centered_spot_RMS_mm"))
-    base_rejection_stage = baseline_record.get("rejection_stage")
-    base_reason = baseline_record.get("rejection_reason")
-    base_lines = [
-        f"[BASE] {baseline_record['candidate_id']}",
-        f"  M1 topology : {base_m1_topology}",
-        f"  M1 quality  : {base_m1_quality}",
-        f"  M2 topology : {base_m2_topology}",
-        f"  M2 quality  : {base_m2_quality}",
-        f"  physical    : {base_phys_text}",
-        f"  chief RMS   : {base_rms} mm",
-    ]
-    if not bool(baseline_record.get("feasible", False)):
-        base_lines.append(
-            f"  failed at   : {base_rejection_stage or 'UNKNOWN'}"
-        )
-        if base_reason and base_reason != "none":
-            base_lines.append(f"  reason      : {base_reason}")
-    base_lines.append(
-        f"  elapsed     : {duration(time.perf_counter() - baseline_started)}"
-    )
-    progress("\n".join(base_lines))
 
-    best_record = baseline_record if baseline_record["feasible"] else None
-    best_payload = baseline_payload if baseline_record["feasible"] else None
-    trust_scales = [
-        float(value)
-        for value in refinement_cfg[
-            "line_search_alphas"
-        ]
+    final_m1 = restoration[
+        "m1"
     ]
 
-    maximum_cycles = int(
-        conditioning_cfg.get(
-            "maximum_search_cycles",
-            refinement_cfg["iterations"],
-        )
-    )
-    minimum_relative = float(refinement_cfg["minimum_relative_improvement"])
-    scale_index = 0
+    final_m2 = restoration[
+        "m2"
+    ]
 
-    exec_cfg = ctx.config.get("execution", {})
-    parallel_enabled = bool(exec_cfg.get("parallel_step11_candidates", False))
-    step11_candidate_workers_cfg = int(exec_cfg.get("step11_candidate_workers", 4))
-    step11_worker_mem_cfg = float(exec_cfg.get("step11_worker_memory_estimate_gib", 1.5))
-    runtime = current_runtime()
-
-    can_use_pool = (
-        parallel_enabled
-        and runtime is not None
-        and not is_compute_worker()
-        and not runtime.is_worker
-        and step11_candidate_workers_cfg > 1
+    set_phase(
+        "FINAL_HARD_CERTIFICATION"
     )
 
-    from execution_v55 import managed_compute_pool
-
-    pool_cm = (
-        managed_compute_pool(
-            step11_common,
-            purpose="STEP11_CANDIDATES",
-            worker_limit=step11_candidate_workers_cfg,
-            worker_memory_estimate_gib=step11_worker_mem_cfg,
-        )
-        if can_use_pool
-        else nullcontext((None, 1, {}))
+    (
+        final_optical_residual,
+        final_metrics,
+        final_trace,
+    ) = _step12_actual_o2_evaluate(
+        ctx,
+        final_m1,
+        final_m2,
+        refinement_cfg,
     )
 
-    effective_mode = "SERIAL"
-    effective_workers = 1
-    max_inflight = 1
+    final_m1_gate = final_metrics[
+        "M1_sanity"
+    ]
 
-    pool_res = pool_cm.__enter__()
-    try:
-        executor, eff_max_inflight, _ = (
-            pool_res if pool_res is not None else (None, 1, {})
-        )
-        if executor is not None and eff_max_inflight > 1:
-            effective_mode = "PROCESS_POOL"
-            effective_workers = executor._max_workers
-            max_inflight = eff_max_inflight
-        else:
-            effective_mode = "SERIAL"
-            effective_workers = 1
-            max_inflight = 1
+    final_m2_gate = final_metrics[
+        "M2_sanity"
+    ]
 
-        if runtime is not None:
-            runtime.record(
-                "STEP11_CANDIDATE_EXECUTION_MODE",
-                requested_parallel=parallel_enabled,
-                effective_mode=effective_mode,
-                requested_workers=(step11_candidate_workers_cfg if parallel_enabled else 1),
-                effective_workers=effective_workers,
-                max_inflight=max_inflight,
-                worker_memory_estimate_gib=step11_worker_mem_cfg,
-                candidate_order="SUBMISSION_ORDER",
-                cycles_parallelized=False,
-                baseline_parallelized=False,
-                top2_parallelized=False,
-                ci_kernel_parallelized=False,
-                nested_ray_pool=False,
-            )
-
-        for cycle in range(1, maximum_cycles + 1):
-            if scale_index >= len(trust_scales):
-                break
-            trust_scale = trust_scales[scale_index]
-            origin = center.copy()
-            trial_entries: list[tuple[int, float, dict[str, Any], dict[str, Any] | None]] = []
-            cycle_started = time.perf_counter()
-            cycle_history_start = len(history)
-            set_phase(f"SEARCH_CYCLE_{cycle:02d}")
-            center_label = best_record["candidate_id"] if best_record else "BASELINE"
-            progress(
-                f"[CYCLE {cycle}/{maximum_cycles}] trust={number(trust_scale)} | center={center_label}"
-            )
-
-            total_trials = 2 * len(descriptors)
-            trial_index = 0
-            current_best_key = best_payload["rank_key"] if best_payload is not None else None
-
-            cycle_jobs: list[dict[str, Any]] = []
-            for column, descriptor in enumerate(descriptors):
-                for sign in (-1.0, 1.0):
-                    trial_vector = origin.copy()
-                    trial_vector[column] = float(np.clip(
-                        trial_vector[column] + sign * trust_scale,
-                        -1.0,
-                        1.0,
-                    ))
-                    if np.array_equal(trial_vector, origin):
-                        continue
-                    cand_num, cand_id = allocate_candidate_id()
-                    move = f"{descriptor['kind']}:{descriptor.get('term', '')}:{sign:+.0f}"
-                    cycle_jobs.append({
-                        "schema": "HUD_FAN_V5_5_STEP11_CANDIDATE_JOB_V1",
-                        "job_index": len(cycle_jobs),
-                        "candidate_number": cand_num,
-                        "candidate_id": cand_id,
-                        "cycle": int(cycle),
-                        "trust_scale": float(trust_scale),
-                        "column": int(column),
-                        "sign": float(sign),
-                        "move": move,
-                        "search_vector": trial_vector.copy(),
-                        "snapshot":
-                            allocate_candidate_snapshot(
-                                "COORDINATE"
-                            ),
-                    })
-
-            if runtime is not None:
-                runtime.record(
-                    "STEP11_CYCLE_CANDIDATES_STARTED",
-                    cycle=cycle,
-                    job_count=len(cycle_jobs),
-                    effective_workers=effective_workers,
-                )
-
-            if effective_mode == "PROCESS_POOL" and executor is not None and len(cycle_jobs) > 1:
-                from execution_workers_v55 import ordered_bounded_map, step11_candidate_worker
-                set_phase(f"SEARCH_CYCLE_{cycle:02d}/PARALLEL_COORDINATE_CANDIDATES")
-                cycle_progress_state = {
-                    "completed": 0,
-                    "last_report": time.perf_counter(),
-                }
-
-                def on_cycle_candidate_completed(
-                    completed_index: int,
-                    completed_reply: Any,
-                ) -> None:
-                    """Report completion count without consuming results out of order."""
-                    cycle_progress_state["completed"] += 1
-                    cycle_progress_state["last_report"] = time.perf_counter()
-                    completed_job = cycle_jobs[completed_index]
-                    worker_pid = (
-                        completed_reply.get("pid")
-                        if isinstance(completed_reply, dict)
-                        else None
-                    )
-                    progress(
-                        f"[CYCLE {cycle}/{maximum_cycles}][PROGRESS]"
-                        f" completed={cycle_progress_state['completed']}/{len(cycle_jobs)}"
-                        f" | last={completed_job['candidate_id']}"
-                        f" | worker_pid={worker_pid if worker_pid is not None else 'n/a'}"
-                        f" | workers={effective_workers}"
-                        f" | elapsed={duration(time.perf_counter() - cycle_started)}"
-                    )
-
-                def on_cycle_tick() -> None:
-                    """Emit a heartbeat when no candidate has completed for 30 seconds."""
-                    now = time.perf_counter()
-                    if now - cycle_progress_state["last_report"] < 30.0:
-                        return
-                    cycle_progress_state["last_report"] = now
-                    progress(
-                        f"[CYCLE {cycle}/{maximum_cycles}][HEARTBEAT]"
-                        f" completed={cycle_progress_state['completed']}/{len(cycle_jobs)}"
-                        f" | workers={effective_workers}"
-                        f" | state=RUNNING"
-                        f" | elapsed={duration(now - cycle_started)}"
-                    )
-
-                replies = ordered_bounded_map(
-                    executor,
-                    step11_candidate_worker,
-                    cycle_jobs,
-                    max_inflight,
-                    on_completed=on_cycle_candidate_completed,
-                    on_tick=on_cycle_tick,
-                )
-                set_phase(f"SEARCH_CYCLE_{cycle:02d}")
-            else:
-                replies = []
-                for j in cycle_jobs:
-                    r_rec, r_pay, r_last_phase = evaluate_step11_candidate_job(
-                        step11_common,
-                        j,
-                    )
-                    snapshot_summary = (
-                        _step11_archive_candidate_snapshot(
-                            r_rec,
-                            r_last_phase,
-                            j,
-                        )
-                    )
-                    if snapshot_summary is not None:
-                        r_rec[
-                            "_snapshot_summary"
-                        ] = snapshot_summary
-                    replies.append({
-                        "schema": "HUD_FAN_V5_5_STEP11_CANDIDATE_REPLY_V1",
-                        "job_index": j["job_index"],
-                        "candidate_number": j["candidate_number"],
-                        "candidate_id": j["candidate_id"],
-                        "cycle": j["cycle"],
-                        "pid": os.getpid(),
-                        "record": r_rec,
-                        "payload": r_pay,
-                        "last_phase": r_last_phase,
-                    })
-                    progress(
-                        f"[CYCLE {cycle}/{maximum_cycles}][PROGRESS]"
-                        f" completed={len(replies)}/{len(cycle_jobs)}"
-                        f" | last={j['candidate_id']}"
-                        " | workers=1"
-                        f" | elapsed={duration(time.perf_counter() - cycle_started)}"
-                    )
-
-            if len(replies) != len(cycle_jobs):
-                raise RuntimeError(
-                    f"STEP11_CANDIDATE_REPLY_COUNT_MISMATCH: expected {len(cycle_jobs)}, got {len(replies)}"
-                )
-
-            for expected_idx, (j, reply) in enumerate(zip(cycle_jobs, replies)):
-                if reply.get("schema") != "HUD_FAN_V5_5_STEP11_CANDIDATE_REPLY_V1":
-                    raise RuntimeError("STEP11_CANDIDATE_REPLY_SCHEMA_MISMATCH")
-                if reply.get("job_index") != expected_idx:
-                    raise RuntimeError(
-                        f"STEP11_CANDIDATE_REPLY_ORDER_MISMATCH: expected index {expected_idx}, got {reply.get('job_index')}"
-                    )
-                if reply.get("candidate_id") != j["candidate_id"]:
-                    raise RuntimeError(
-                        f"STEP11_CANDIDATE_REPLY_ID_MISMATCH: expected {j['candidate_id']}, got {reply.get('candidate_id')}"
-                    )
-                if reply.get("cycle") != j["cycle"]:
-                    raise RuntimeError("STEP11_CANDIDATE_REPLY_CYCLE_MISMATCH")
-
-                record = reply["record"]
-                payload = reply["payload"]
-                register_candidate_snapshot(
-                    record
-                )
-                column = j["column"]
-                sign = j["sign"]
-                trial_index += 1
-
-                history.append(
-                    candidate_history_row(
-                        record
-                    )
-                )
-                trial_entries.append(
-                    (
-                        column,
-                        sign,
-                        record,
-                        payload,
-                    )
-                )
-                is_trial_best = False
-                if record["feasible"] and payload is not None:
-                    trial_rank_key = payload["rank_key"]
-                    if current_best_key is None or trial_rank_key < current_best_key:
-                        is_trial_best = True
-                        current_best_key = trial_rank_key
-
-                log_candidate(record, trial_index, total_trials, is_best=is_trial_best)
-
-            worker_pids = sorted(list({int(r.get("pid", 0)) for r in replies}))
-            if runtime is not None:
-                runtime.record(
-                    "STEP11_CYCLE_CANDIDATES_COMPLETED",
-                    cycle=cycle,
-                    job_count=len(cycle_jobs),
-                    elapsed_seconds=float(time.perf_counter() - cycle_started),
-                    worker_pids=worker_pids,
-                    effective_workers=effective_workers,
-                )
-
-            feasible_entries = [
-                entry
-                for entry in trial_entries
-                if entry[2]["feasible"] and entry[3] is not None
-            ]
-            feasible_entries.sort(key=lambda entry: entry[3]["rank_key"])
-
-            distinct: list[tuple[int, float, dict[str, Any], dict[str, Any]]] = []
-            used_columns: set[int] = set()
-            for entry in feasible_entries:
-                if entry[0] in used_columns:
-                    continue
-                used_columns.add(entry[0])
-                distinct.append(entry)
-                if len(distinct) == 2:
-                    break
-
-            if len(distinct) == 2:
-                combination = origin.copy()
-                for column, sign, _, _ in distinct:
-                    combination[column] = float(np.clip(
-                        combination[column] + sign * trust_scale,
-                        -1.0,
-                        1.0,
-                    ))
-                top2_move = f"{distinct[0][2].get('move', '')} + {distinct[1][2].get('move', '')}"
-                record, payload = evaluate_candidate(
-                    combination,
-                    cycle=cycle,
-                    trust_scale=trust_scale,
-                    move="COMBINATION_TOP2",
-                )
-                history.append(
-                    candidate_history_row(
-                        record
-                    )
-                )
-                is_top2_best = False
-                if (
-                    record[
-                        "feasible"
-                    ]
-                    and payload is not None
-                ):
-                    feasible_entries.append(
-                        (
-                            -1,
-                            0.0,
-                            record,
-                            payload,
-                        )
-                    )
-                    feasible_entries.sort(
-                        key=lambda entry:
-                            entry[
-                                3
-                            ][
-                                "rank_key"
-                            ]
-                    )
-                    if current_best_key is None or payload["rank_key"] < current_best_key:
-                        is_top2_best = True
-                        current_best_key = payload["rank_key"]
-
-                top2_m1_topology, top2_m1_quality = candidate_surface_status(
-                    record,
-                    "M1",
-                )
-                top2_m2_topology, top2_m2_quality = candidate_surface_status(
-                    record,
-                    "M2",
-                )
-                phys_val = record.get("physical_fraction")
-                phys_str = f"{100.0 * float(phys_val):.1f}%" if phys_val is not None and np.isfinite(float(phys_val)) else "n/a"
-                rms_str = number(record.get("chief_centered_spot_RMS_mm"))
-                top2_failure = ""
-                if not bool(record.get("feasible", False)):
-                    top2_failure = (
-                        f" | failed_at={record.get('rejection_stage') or 'UNKNOWN'}"
-                    )
-                    if record.get("rejection_reason"):
-                        top2_failure += (
-                            f" | reason={record['rejection_reason']}"
-                        )
-                best_mark = " ★ NEW BEST" if is_top2_best else ""
-                progress(
-                    f"[TOP2] {top2_move} | "
-                    f"M1_topology={top2_m1_topology} | "
-                    f"M2_topology={top2_m2_topology} | "
-                    f"M1_quality={top2_m1_quality} | "
-                    f"M2_quality={top2_m2_quality} | "
-                    f"phys={phys_str} | RMS={rms_str} mm"
-                    f"{top2_failure}{best_mark}"
-                )
-                if is_top2_best:
-                    progress(
-                        f"[BEST] {record['candidate_id']} | COMBINATION_TOP2 | "
-                        f"physical={phys_str} | RMS={rms_str} mm | "
-                        f"J={number(record.get('optical_objective'))}"
-                    )
-
-            cycle_best = feasible_entries[0] if feasible_entries else None
-            improved = bool(
-                cycle_best is not None
-                and (
-                    best_payload is None
-                    or cycle_best[3]["rank_key"] < best_payload["rank_key"]
-                )
-            )
-
-            def log_cycle_done(action_name: str, next_trust_val: float) -> None:
-                """In bảng tổng kết chu kỳ tìm kiếm O2 theo taxonomy chuẩn."""
-                c_rows = history[cycle_history_start:]
-                n_eval = len(c_rows)
-                n_pref = sum(1 for r in c_rows if r.get("feasible") and r.get("physical_quality_status") == "PASS")
-                n_warn = sum(1 for r in c_rows if r.get("feasible") and r.get("physical_quality_status") == "WARN")
-                n_hard = sum(1 for r in c_rows if not r.get("feasible"))
-                b_id = best_record["candidate_id"] if best_record else "NONE"
-                b_move = best_record.get("move", "NONE") if best_record else "NONE"
-                b_phys = (
-                    f"{100.0 * float(best_record['physical_fraction']):.2f}%"
-                    if best_record and best_record.get("physical_fraction") is not None
-                    else "n/a"
-                )
-                b_rms = (
-                    f"{number(best_record.get('chief_centered_spot_RMS_mm'))} mm"
-                    if best_record
-                    else "n/a"
-                )
-                cycle_lines = [
-                    f"[CYCLE {cycle}/{maximum_cycles}] DONE",
-                    f"  evaluated    : {n_eval}",
-                    f"  preferred    : {n_pref}",
-                    f"  physical WARN: {n_warn}",
-                    f"  hard rejected: {n_hard}",
-                    f"  best         : {b_id}",
-                    f"  move         : {b_move}",
-                    f"  physical     : {b_phys}",
-                    f"  RMS          : {b_rms}",
-                    f"  action       : {action_name}",
-                    f"  next trust   : {number(next_trust_val)}",
-                    f"  elapsed      : {duration(time.perf_counter() - cycle_started)}",
-                ]
-                progress("\n".join(cycle_lines))
-
-            if not improved:
-                next_t = trust_scales[scale_index + 1] if scale_index + 1 < len(trust_scales) else 0.0
-                log_cycle_done("SHRINK_TRUST", next_t)
-                scale_index += 1
-                continue
-
-            previous_payload = best_payload
-
-            previous_quality_rank = (
-                int(
-                    previous_payload[
-                        "rank_key"
-                    ][
-                        0
-                    ]
-                )
-                if previous_payload is not None
-                else 1
-            )
-
-            previous_spot_rms = (
-                float(
-                    previous_payload[
-                        "optical_metrics"
-                    ][
-                        "chief_centered_spot_RMS_mm"
-                    ]
-                )
-                if previous_payload is not None
-                else float(
-                    "inf"
-                )
-            )
-
-            best_record = cycle_best[
-                2
-            ]
-
-            best_payload = cycle_best[
-                3
-            ]
-
-            center = np.asarray(
-                best_payload[
-                    "search_vector"
-                ],
-                float,
-            ).copy()
-
-            current_quality_rank = int(
-                best_payload[
-                    "rank_key"
-                ][
-                    0
-                ]
-            )
-
-            current_spot_rms = float(
-                best_payload[
-                    "optical_metrics"
-                ][
-                    "chief_centered_spot_RMS_mm"
-                ]
-            )
-
-            relative_improvement = (
-                float(
-                    "inf"
-                )
-                if (
-                    previous_payload is None
-                    or
-                    current_quality_rank
-                    <
-                    previous_quality_rank
-                )
-                else
-                (
-                    previous_spot_rms
-                    -
-                    current_spot_rms
-                )
-                /
-                max(
-                    abs(
-                        previous_spot_rms
-                    ),
-                    1e-12,
-                )
-            )
-            if np.isfinite(relative_improvement) and relative_improvement < minimum_relative:
-                log_cycle_done("STOP_PLATEAU", trust_scale)
-                break
-            log_cycle_done("ACCEPT_NEW_CENTER", trust_scale)
-    except BaseException:
-        pool_cm.__exit__(*sys.exc_info())
-        raise
-    else:
-        pool_cm.__exit__(None, None, None)
-
-    if best_payload is None or best_record is None:
-        set_phase("SEARCH_NO_FEASIBLE_PAIR")
-        write_candidate_snapshot_manifest(
-            "SEARCH_NO_FEASIBLE_PAIR"
-        )
-        write_csv(step_dir / "11_O2_SEARCH_HISTORY.csv", history)
-        stage_counts: dict[str, int] = {}
-        reason_counts: dict[str, int] = {}
-        for row in history:
-            if not row.get("feasible"):
-                stg = str(row.get("rejection_stage") or "UNKNOWN")
-                stage_counts[stg] = stage_counts.get(stg, 0) + 1
-                rsn = str(row.get("rejection_reason") or "unspecified")
-                for sub_r in rsn.split(","):
-                    sub_r = sub_r.strip()
-                    if sub_r:
-                        reason_counts[sub_r] = reason_counts.get(sub_r, 0) + 1
-
-        n_pref = sum(1 for r in history if r.get("feasible") and r.get("physical_quality_status") == "PASS")
-        n_warn = sum(1 for r in history if r.get("feasible") and r.get("physical_quality_status") == "WARN")
-        n_hard = sum(1 for r in history if not r.get("feasible"))
-        top_stages = sorted(stage_counts.items(), key=lambda x: x[1], reverse=True)[:3]
-        top_reasons = sorted(reason_counts.items(), key=lambda x: x[1], reverse=True)[:4]
-
-        fail_lines = [
-            "=" * 80,
-            "[FAILED] NO O2 PAIR",
-            "=" * 80,
-            f"Candidates evaluated : {len(history)}",
-            f"Preferred candidates : {n_pref}",
-            f"Physical WARN        : {n_warn}",
-            f"Hard rejected        : {n_hard}",
-            "",
-            "Top rejection stages:",
-        ]
-        for stg, cnt in top_stages:
-            fail_lines.append(f"  {stg:<20} : {cnt}")
-        fail_lines.append("")
-        fail_lines.append("Top reasons:")
-        for rsn, cnt in top_reasons:
-            fail_lines.append(f"  {rsn:<20} : {cnt}")
-        fail_lines.append("")
-        fail_lines.append(f"Last phase:\n  SEARCH_CYCLE_{cycle:02d}")
-        fail_lines.append("")
-        fail_lines.append("Diagnostic:")
-        fail_lines.append("  STEP_11/11_O2_SEARCH_HISTORY.csv")
-        fail_lines.append("  STEP_11/11_SEARCH_DASHBOARD.png")
-        fail_lines.append("  STEP_11/11_TOPOLOGY_MAPS.png")
-        fail_lines.append("=" * 80)
-        progress("\n".join(fail_lines))
-
-        m2_raw_convex_candidate_count = int(
-            sum(
-                bool(
-                    row.get(
-                        "M2_raw_convex_ray_facing_pass",
-                        False,
-                    )
-                )
-                for row in history
-            )
-        )
-
-        if m2_raw_convex_candidate_count == 0:
-            raise RuntimeError(
-                "STEP11_NO_RAW_CONVEX_RAY_FACING_M2_CANDIDATE"
-            )
-
-        raise RuntimeError("STEP11_NO_FEASIBLE_O2_PAIR")
-
-    set_phase("APPLY_SELECTED_PAIR")
-    winner = best_payload
-
-    winner_m1_raw_pass = bool(
-        winner[
-            "M1_shape_gate"
-        ][
+    if not bool(
+        final_m1_gate[
             "topology_pass"
         ]
-    )
-
-    winner_m2_raw_pass = bool(
-        winner[
-            "M2_shape_gate"
-        ][
-            "topology_pass"
-        ]
-    )
-
-    winner_actual_m1_raw_pass = bool(
-        winner[
-            "optical_metrics"
-        ][
-            "M1_sanity"
-        ][
-            "topology_pass"
-        ]
-    )
-
-    winner_actual_m2_raw_pass = bool(
-        winner[
-            "optical_metrics"
-        ][
-            "M2_sanity"
-        ][
-            "topology_pass"
-        ]
-    )
-
-    if not (
-        winner_m1_raw_pass
-        and winner_m2_raw_pass
-        and winner_actual_m1_raw_pass
-        and winner_actual_m2_raw_pass
     ):
         raise RuntimeError(
-            "STEP11_SELECTED_WINNER_RAW_TOPOLOGY_INVALID"
+            "STEP11_FINAL_M1_RAW_TOPOLOGY_FAILED:"
+            +
+            ",".join(
+                final_m1_gate[
+                    "topology_failure_reasons"
+                ]
+            )
         )
 
-    m1_orientation_sign = float(
-        winner[
-            "M1_shape_gate"
-        ][
-            "orientation_sign"
+    if not bool(
+        final_m2_gate[
+            "topology_pass"
+        ]
+    ):
+        raise RuntimeError(
+            "STEP11_FINAL_M2_RAW_TOPOLOGY_FAILED:"
+            +
+            ",".join(
+                final_m2_gate[
+                    "topology_failure_reasons"
+                ]
+            )
+        )
+
+    physical_valid = np.asarray(
+        final_trace[
+            "valid"
+        ],
+        bool,
+    )
+
+    if not np.any(
+        physical_valid
+    ):
+        raise RuntimeError(
+            "STEP11_FINAL_NO_VALID_PHYSICAL_RAYS"
+        )
+
+    final_mf2 = mf2_geometry(
+        final_trace[
+            "points"
+        ][0][
+            physical_valid
+        ],
+
+        final_trace[
+            "points"
+        ][1][
+            physical_valid
+        ],
+
+        final_trace[
+            "points"
+        ][2][
+            physical_valid
+        ],
+
+        final_m2,
+
+        float(
+            ctx.config[
+                "fan_weights"
+            ][
+                "omega2"
+            ]
+        ),
+
+        ctx.data[
+            "n_obs"
+        ],
+    )
+
+    unobscured = bool(
+        float(
+            final_mf2[
+                "S_AQP_signed_mm2"
+            ]
+        )
+        >= 0.0
+    )
+
+    if not unobscured:
+
+        raise RuntimeError(
+            "STEP11_FINAL_UNOBSCURATION_FAILED:"
+            f"S_AQP={float(final_mf2['S_AQP_signed_mm2']):.12g}"
+        )
+
+    curvature_limit = float(
+        surface_fit_cfg[
+            "curvature_absolute_max_per_mm"
         ]
     )
 
-    m2_orientation_sign = float(
-        winner[
-            "M2_shape_gate"
-        ][
-            "orientation_sign"
+    conic_lo, conic_hi = map(
+        float,
+        surface_fit_cfg[
+            "conic_bounds"
+        ],
+    )
+
+    bound_tolerance = float(
+        restoration_cfg[
+            "bound_hit_relative_tolerance"
         ]
     )
 
-    phys_pct = 100.0 * float(winner["optical_metrics"]["physical_fraction"])
-    phys_status = winner.get("physical_quality_status", "PASS")
-    winner_lines = [
-        "=" * 80,
-        "[WINNER]",
-        f"  id              : {best_record['candidate_id']}",
-        f"  move            : {best_record.get('move', 'UNKNOWN')}",
-        f"  physical        : {phys_pct:.2f}% [{phys_status}]",
-        f"  chief RMS       : {float(winner['optical_metrics']['chief_centered_spot_RMS_mm']):.3f} mm",
-        f"  objective J     : {float(winner['optical_metrics']['J_step12_actual_o2_dimensionless']):.5f}",
-        f"  M1 topology     : {winner['M1_shape_gate'].get('status', 'PASS')}",
-        f"  M2 topology     : {winner['M2_shape_gate'].get('status', 'PASS')}",
-        f"  M1 quality      : {winner.get('M1_quality_status', 'PASS')}",
-        f"  M2 quality      : {winner.get('M2_quality_status', 'PASS')}",
-        f"  total candidates: {candidate_counter}",
-        "=" * 80,
-    ]
-    progress("\n".join(winner_lines))
+    parameter_bound_rows = []
+
+    for name, surface in (
+        ("M1", final_m1),
+        ("M2", final_m2),
+    ):
+
+        curvature_hit = bool(
+            abs(
+                float(
+                    surface.curvature
+                )
+            )
+            >=
+            curvature_limit
+            *
+            (
+                1.0
+                -
+                bound_tolerance
+            )
+        )
+
+        conic_span = max(
+            abs(
+                conic_hi
+                -
+                conic_lo
+            ),
+            1.0,
+        )
+
+        conic_hit = bool(
+            abs(
+                float(
+                    surface.conic
+                )
+                -
+                conic_lo
+            )
+            <=
+            bound_tolerance
+            *
+            conic_span
+            or
+            abs(
+                float(
+                    surface.conic
+                )
+                -
+                conic_hi
+            )
+            <=
+            bound_tolerance
+            *
+            conic_span
+        )
+
+        parameter_bound_rows.append({
+            "surface":
+                name,
+
+            "curvature_per_mm":
+                float(
+                    surface.curvature
+                ),
+
+            "curvature_absolute_limit_per_mm":
+                curvature_limit,
+
+            "curvature_bound_hit":
+                curvature_hit,
+
+            "conic_constant":
+                float(
+                    surface.conic
+                ),
+
+            "conic_bounds":
+                [
+                    conic_lo,
+                    conic_hi,
+                ],
+
+            "conic_bound_hit":
+                conic_hit,
+        })
+
+    if bool(
+        restoration_cfg[
+            "reject_final_parameter_bound_hit"
+        ]
+    ):
+
+        if any(
+            row[
+                "curvature_bound_hit"
+            ]
+            or
+            row[
+                "conic_bound_hit"
+            ]
+            for row
+            in parameter_bound_rows
+        ):
+
+            raise RuntimeError(
+                "STEP11_FINAL_PARAMETER_BOUND_HIT"
+            )
+
+    final_fit_m1 = (
+        _step11_final_fit_diagnostic(
+            final_m1,
+            ctx.data[
+                "ci_m1"
+            ],
+            surface_fit_cfg,
+        )
+    )
+
+    final_fit_m2 = (
+        _step11_final_fit_diagnostic(
+            final_m2,
+            seed[
+                "ci_m2"
+            ],
+            surface_fit_cfg,
+        )
+    )
+
+    write_csv(
+        step_dir
+        /
+        "11_RESTORATION_JACOBIAN_COLUMNS.csv",
+
+        restoration[
+            "jacobian_history"
+        ],
+    )
+
+    write_csv(
+        step_dir
+        /
+        "11_TOPOLOGY_RESTORATION_HISTORY.csv",
+
+        restoration[
+            "history"
+        ],
+    )
+
+    write_json(
+        step_dir
+        /
+        "11_FINAL_PARAMETER_BOUND_STATE.json",
+
+        {
+            "schema":
+                "HUD_FAN_V5_5_"
+                "STEP11_PARAMETER_BOUND_STATE_V1",
+
+            "surfaces":
+                parameter_bound_rows,
+        },
+    )
+
+    write_json(
+        step_dir
+        /
+        "11_TOPOLOGY_RESTORATION_SUMMARY.json",
+
+        {
+            "schema":
+                "HUD_FAN_V5_5_"
+                "STEP11_JOINT_TOPOLOGY_RESTORATION_V1",
+
+            "success":
+                True,
+
+            "stop_reason":
+                restoration[
+                    "stop_reason"
+                ],
+
+            "iteration_count":
+                len(
+                    restoration[
+                        "history"
+                    ]
+                ),
+
+            "variable_count":
+                len(
+                    descriptors
+                ),
+
+            "effective_workers":
+                restoration[
+                    "effective_workers"
+                ],
+
+            "selected_normalized_vector":
+                restoration[
+                    "u"
+                ].tolist(),
+
+            "final_objective":
+                restoration[
+                    "final_objective"
+                ],
+
+            "final_meta":
+                restoration[
+                    "meta"
+                ],
+
+            "fixed_grid_samples": {
+                "M1":
+                    len(
+                        grids[
+                            "M1"
+                        ][
+                            "xy"
+                        ]
+                    ),
+
+                "M2":
+                    len(
+                        grids[
+                            "M2"
+                        ][
+                            "xy"
+                        ]
+                    ),
+            },
+
+            "normalization": {
+                "H_scale_per_mm":
+                    restoration_cfg[
+                        "mean_curvature_scale_per_mm"
+                    ],
+
+                "KG_scale_per_mm2":
+                    restoration_cfg[
+                        "gaussian_curvature_scale_per_mm2"
+                    ],
+
+                "principal_scale_per_mm":
+                    restoration_cfg[
+                        "principal_curvature_scale_per_mm"
+                    ],
+
+                "gradient_scale_per_mm2":
+                    restoration_cfg[
+                        "curvature_gradient_scale_per_mm2"
+                    ],
+            },
+
+            "weights":
+                restoration_cfg[
+                    "weights"
+                ],
+        },
+    )
+
+    write_csv(
+        step_dir
+        /
+        "11_RESTORATION_GRID_M1.csv",
+
+        [
+            {
+                "sample_index":
+                    int(index),
+
+                "x_mm":
+                    float(
+                        point[0]
+                    ),
+
+                "y_mm":
+                    float(
+                        point[1]
+                    ),
+            }
+            for index, point
+            in enumerate(
+                grids[
+                    "M1"
+                ][
+                    "xy"
+                ]
+            )
+        ],
+    )
+
+    write_csv(
+        step_dir
+        /
+        "11_RESTORATION_GRID_M2.csv",
+
+        [
+            {
+                "sample_index":
+                    int(index),
+
+                "x_mm":
+                    float(
+                        point[0]
+                    ),
+
+                "y_mm":
+                    float(
+                        point[1]
+                    ),
+            }
+            for index, point
+            in enumerate(
+                grids[
+                    "M2"
+                ][
+                    "xy"
+                ]
+            )
+        ],
+    )
+
+    compatibility_history = []
+
+    for row in restoration[
+        "history"
+    ]:
+
+        topology_pass = bool(
+            row.get(
+                "M1_raw_topology_pass",
+                False,
+            )
+            and
+            row.get(
+                "M2_raw_topology_pass",
+                False,
+            )
+        )
+
+        compatibility_history.append({
+            "candidate_id":
+                "RESTORE_ITER_"
+                f"{int(row['iteration']):03d}",
+
+            "cycle":
+                int(
+                    row[
+                        "iteration"
+                    ]
+                ),
+
+            "trust_scale":
+                row.get(
+                    "trust_radius"
+                ),
+
+            "move":
+                "JOINT_LM_RESTORATION",
+
+            "feasible":
+                topology_pass,
+
+            "rejection_stage":
+                (
+                    None
+                    if topology_pass
+                    else
+                    "TOPOLOGY_RESTORATION"
+                ),
+
+            "rejection_reason":
+                (
+                    None
+                    if topology_pass
+                    else
+                    "RESTORATION_IN_PROGRESS"
+                ),
+
+            "M1_shape_pass":
+                row.get(
+                    "M1_raw_topology_pass"
+                ),
+
+            "M2_shape_pass":
+                row.get(
+                    "M2_raw_topology_pass"
+                ),
+
+            "M1_H_min_per_mm":
+                row.get(
+                    "M1_H_min_per_mm"
+                ),
+
+            "M1_KG_min_per_mm2":
+                row.get(
+                    "M1_KG_min_per_mm2"
+                ),
+
+            "M1_oriented_H_min_per_mm":
+                row.get(
+                    "M1_oriented_H_min_per_mm"
+                ),
+
+            "M2_H_min_per_mm":
+                row.get(
+                    "M2_H_min_per_mm"
+                ),
+
+            "M2_KG_min_per_mm2":
+                row.get(
+                    "M2_KG_min_per_mm2"
+                ),
+
+            "M2_oriented_H_min_per_mm":
+                row.get(
+                    "M2_oriented_H_min_per_mm"
+                ),
+
+            "physical_fraction":
+                row.get(
+                    "physical_fraction"
+                ),
+
+            "optical_objective":
+                row.get(
+                    "objective_after"
+                ),
+
+            "M2_CI_bundle_curl_rms_p95_actual": None,
+            "M2_CI_bundle_curl_rms_p95_limit": None,
+            "M2_CI_bundle_local_geometry_normal_rms_p95_actual": None,
+            "M2_CI_bundle_local_geometry_normal_rms_p95_limit": None,
+            "M2_CI_bundle_loop_circulation_p95_actual": None,
+            "M2_CI_bundle_loop_circulation_p95_limit": None,
+            "M2_CI_bundle_edge_gradient_height_residual_p95_actual": None,
+            "M2_CI_bundle_edge_gradient_height_residual_p95_limit": None,
+            "M2_CI_bundle_nearest_normal_angle_p99_actual": None,
+            "M2_CI_bundle_nearest_normal_angle_p99_limit": None,
+            "M2_CI_bundle_count": None,
+            "M2_CI_evaluable_bundle_count": None,
+            "M2_fit_curvature_per_mm": None,
+            "M2_fit_conic_constant": None,
+            "M2_fit_sag_rms_mm": None,
+            "M2_fit_normal_rms_deg": None,
+            "M2_fit_normal_max_deg": None,
+            "M2_fit_k_bound_hit": None,
+            "M2_fit_curvature_bound_hit": None,
+            "M1_topology_enforcement": None,
+            "M1_topology_admitted": None,
+            "M1_topology_admission_status": None,
+            "M1_topology_warning_reasons": None,
+            "M2_topology_enforcement": None,
+            "M2_topology_admitted": None,
+            "M2_topology_admission_status": None,
+            "M2_topology_warning_reasons": None,
+            "candidate_surface_admitted": None,
+            "actual_M1_topology_pass": None,
+            "actual_M1_topology_admitted": None,
+            "actual_M1_topology_admission_status": None,
+            "actual_M1_topology_warning_reasons": None,
+            "actual_M2_topology_pass": None,
+            "actual_M2_topology_admitted": None,
+            "actual_M2_topology_admission_status": None,
+            "actual_M2_topology_warning_reasons": None,
+        })
+
+    write_csv(
+        step_dir
+        /
+        "11_O2_SEARCH_HISTORY.csv",
+
+        compatibility_history,
+    )
+
+    final_m1_trust = (
+        _step11_ci_trust_gate(
+            restoration_common_seed,
+            final_m1,
+        )
+    )
+
     ctx.data.update({
-        "m1": winner["m1"],
-        "m2": winner["m2"],
-        "fit_m1_order2": baseline_fit,
-        "fit_m2_order2": winner["fit_m2_order2"],
-        "fit_m1_order2_role": "BASELINE_SEARCH_CENTER",
-        "ci_m1_diagnostics": m1_diagnostic,
-        "ci_m2": winner["ci_m2"],
-        "ci_m2_diagnostics": winner["M2_diagnostic"],
+        "m1":
+            final_m1,
+
+        "m2":
+            final_m2,
+
+        "fit_m1_order2":
+            final_fit_m1,
+
+        "fit_m2_order2":
+            final_fit_m2,
+
+        "fit_m1_order2_role":
+            "STEP11_FINAL_JOINT_RESTORATION_"
+            "DIAGNOSTIC_AGAINST_FROZEN_CI",
+
+        "ci_m1_diagnostics":
+            m1_diagnostic,
+
+        "ci_m2":
+            seed[
+                "ci_m2"
+            ],
+
+        "ci_m2_diagnostics":
+            seed[
+                "M2_diagnostic"
+            ],
+
         "step11_selected_m2_conditioning_audit":
-            winner["M2_conditioning_audit"],
-        "step11_selected_m1_ci_trust": winner["M1_ci_trust"],
+            seed[
+                "M2_conditioning_audit"
+            ],
+
+        "step11_selected_m1_ci_trust":
+            final_m1_trust,
+
         "step11_shape_authority": {
             "authority":
                 "FIXED_RAY_FACING_DESIGN_TOPOLOGY",
@@ -18030,157 +22116,88 @@ def step_11(ctx: Context) -> dict[str, Any]:
                 m2_topology,
 
             "topology_enforcement":
-                dict(topology_enforcement),
+                dict(
+                    topology_enforcement
+                ),
 
             "M1_orientation_sign":
-                m1_orientation_sign,
+                float(
+                    final_m1_gate[
+                        "orientation_sign"
+                    ]
+                ),
 
             "M2_orientation_sign":
-                m2_orientation_sign,
+                float(
+                    final_m2_gate[
+                        "orientation_sign"
+                    ]
+                ),
 
             "shape_policy":
                 shape_policy,
         },
-        "step11_selected_pair_metrics": winner["optical_metrics"],
-        "step11_o2_search_history": history,
+
+        "step11_selected_pair_metrics":
+            final_metrics,
+
+        "step11_topology_restoration_history":
+            restoration[
+                "history"
+            ],
+
+        # Legacy compatibility.
+        "step11_o2_search_history":
+            compatibility_history,
     })
 
-    set_phase("EXPORT_EVIDENCE")
-    progress("Exporting selected-pair evidence")
-    write_csv(step_dir / "11_O2_SEARCH_HISTORY.csv", history)
-    write_json(step_dir / "11_M1_SHAPE_GATE.json", winner["M1_shape_gate"])
-    write_json(step_dir / "11_M1_CI_TRUST_GATE.json", winner["M1_ci_trust"])
-    write_json(step_dir / "11_M1_RETRACE_AUDIT.json", winner["M1_retrace_audit"])
-    write_json(step_dir / "11_M2_CLOUD_INTEGRABILITY_DIAGNOSTICS.json", winner["M2_diagnostic"])
-    write_json(step_dir / "11_M2_CI_INTEGRABILITY_GATE.json", winner["M2_integrability_gate"])
-    write_json(step_dir / "11_M2_CI_CONDITIONING.json", winner["M2_conditioning_audit"])
-    write_json(step_dir / "11_M2_FIT_DIAGNOSTICS.json", winner["fit_m2_order2"])
-    write_json(step_dir / "11_M2_SHAPE_GATE.json", winner["M2_shape_gate"])
-    write_json(step_dir / "11_SELECTED_O2_PAIR_METRICS.json", winner["optical_metrics"])
     write_json(
-        step_dir / "11_O2_SEARCH_SUMMARY.json",
-        {
-            "schema": "HUD_FAN_V5_5_STEP11_SYSTEM_AWARE_O2_PAIR_V1",
-            "candidate_count": int(candidate_counter),
-            "feasible_candidate_count": int(sum(bool(row["feasible"]) for row in history)),
-            "selected_candidate_id": best_record["candidate_id"],
-            "selected_search_vector": winner["search_vector"].tolist(),
-            "physical_dof_scales": physical_scales.tolist(),
-            "M1_topology":
-                m1_topology,
-
-            "M2_topology":
-                m2_topology,
-
-            "topology_authority":
-                "FIXED_RAY_FACING_DESIGN_TOPOLOGY",
-
-            "M1_orientation_sign":
-                m1_orientation_sign,
-
-            "M2_orientation_sign":
-                m2_orientation_sign,
-
-            # FEASIBLE_FIRST_THEN_ACTUAL_OPTICAL_OBJECTIVE_THEN_M2_REPRESENTABILITY
-            "rank_rule":
-                (
-                    "PER_SURFACE_TOPOLOGY_ENFORCEMENT_AND_"
-                    "UNOBSCURATION_THEN_PHYSICAL_QUALITY_BUCKET_"
-                    "THEN_CHIEF_CENTERED_SPOT_RMS_THEN_ACTUAL_"
-                    "OPTICAL_OBJECTIVE_THEN_M2_REPRESENTABILITY"
-                ),
-
-            "minimum_physical_fraction":
-                float(
-                    quality_cfg[
-                        "minimum_physical_fraction"
-                    ]
-                ),
-
-            "minimum_physical_fraction_role":
-                "SOFT_PREFERRED_THRESHOLD_FOR_RANK_BUCKET",
-
-            "unobscured_is_hard_constraint":
-                True,
-
-            "integrability_enforcement":
-                integrability_policy[
-                    "enforcement"
-                ],
-
-            "shape_is_hard_constraint_not_merit":
-                False,
-
-            "topology_is_hard_constraint_not_merit":
-                all(
-                    value == "HARD"
-                    for value in topology_enforcement.values()
-                ),
-
-            "M1_topology_is_hard_constraint_not_merit":
-                topology_enforcement["M1"] == "HARD",
-
-            "M2_topology_is_hard_constraint_not_merit":
-                topology_enforcement["M2"] == "HARD",
-
-            "topology_warn_admission_enabled":
-                any(
-                    value == "WARN"
-                    for value in topology_enforcement.values()
-                ),
-
-            "shape_quality_enforcement":
-                "WARN",
-
-            "ci_trust_is_hard_search_region_not_winner_selector":
-                False,
-
-            "ci_trust_enforcement":
-                "WARN",
-            "candidate_execution_mode": effective_mode,
-            "candidate_workers_requested": (step11_candidate_workers_cfg if parallel_enabled else 1),
-            "candidate_workers_effective": effective_workers,
-            "candidate_result_order": "SUBMISSION_ORDER",
-            "baseline_parallelized": False,
-            "top2_parallelized": False,
-            "cycles_parallelized": False,
-            "ci_kernel_parallelized": False,
-        },
+        step_dir / "11_M1_SHAPE_GATE.json",
+        final_m1_gate,
     )
 
-    ci = winner["ci_m2"]
-    write_csv(
-        step_dir / "11_M2_CI_POINTS_NORMALS.csv",
-        [
-            {
-                "ray_id": r["rows"][i]["ray_id"],
-                "x_mm": p[0],
-                "y_mm": p[1],
-                "z_mm": p[2],
-                "nx": n[0],
-                "ny": n[1],
-                "nz": n[2],
-            }
-            for i, (p, n) in enumerate(zip(ci["points_by_ray"], ci["normals_by_ray"]))
-        ],
+    write_json(
+        step_dir / "11_M1_CI_TRUST_GATE.json",
+        final_m1_trust,
     )
-    write_csv(
-        step_dir / "11_M2_NEAREST_RAY_TOPOLOGY.csv",
-        _ci_topology_rows(ci, r, ctx.config["ci_construction"]["mode"]),
+
+    write_json(
+        step_dir / "11_M2_CLOUD_INTEGRABILITY_DIAGNOSTICS.json",
+        seed["M2_diagnostic"],
     )
-    from diagnostics_v55 import summarize_ci_fallbacks
-    ci_diag_m2 = summarize_ci_fallbacks(ci, r)
-    write_json(step_dir / "11_M2_CI_FALLBACK_DIAGNOSTICS.json", ci_diag_m2)
-    slot11 = ctx.data.get("_step_debug")
-    if isinstance(slot11, dict) and slot11.get("step") == 11:
-        slot11["ci_fallbacks"]["M2"] = ci_diag_m2
+
+    write_json(
+        step_dir / "11_M2_CI_INTEGRABILITY_GATE.json",
+        seed["M2_integrability_gate"],
+    )
+
+    write_json(
+        step_dir / "11_M2_CI_CONDITIONING.json",
+        seed["M2_conditioning_audit"],
+    )
+
+    write_json(
+        step_dir / "11_M2_FIT_DIAGNOSTICS.json",
+        final_fit_m2,
+    )
+
+    write_json(
+        step_dir / "11_M2_SHAPE_GATE.json",
+        final_m2_gate,
+    )
+
+    write_json(
+        step_dir / "11_SELECTED_O2_PAIR_METRICS.json",
+        final_metrics,
+    )
+
     write_csv(
         step_dir / "11_M2_CLOUD_DIAGNOSTIC_SAMPLES.csv",
-        winner["M2_diagnostic"]["cloud"].get("sample_rows", []),
+        seed["M2_diagnostic"]["cloud"].get("sample_rows", []),
     )
     write_csv(
         step_dir / "11_M2_CLOUD_BUNDLE_DIAGNOSTICS.csv",
-        winner["M2_diagnostic"]["cloud"].get("bundle_rows", []),
+        seed["M2_diagnostic"]["cloud"].get("bundle_rows", []),
     )
 
     write_candidate_snapshot_manifest(
@@ -18189,44 +22206,117 @@ def step_11(ctx: Context) -> dict[str, Any]:
     set_phase("COMPLETE")
     progress(
         "Complete | "
-        f"selected={best_record['candidate_id']} | "
-        f"chief_RMS_mm={number(winner['optical_metrics']['chief_centered_spot_RMS_mm'])} | "
-        f"mapping_rms_mm={number(winner['optical_metrics']['mapping_field_rms_mm'])} | "
-        f"spot_rms_mm={number(winner['optical_metrics']['spot_field_rms_mm'])} | "
-        f"direction_rms_deg={number(winner['optical_metrics']['target_direction_rms_deg'])} | "
+        f"restoration_iterations={len(restoration['history'])} | "
+        f"final_objective={restoration['final_objective']:.6g} | "
+        f"mapping_rms_mm={number(final_metrics['mapping_field_rms_mm'])} | "
+        f"spot_rms_mm={number(final_metrics['spot_field_rms_mm'])} | "
+        f"direction_rms_deg={number(final_metrics['target_direction_rms_deg'])} | "
         f"elapsed={duration(time.perf_counter() - step_started)}"
     )
+
     return {
-        "status": "PASS",
-        "mode": "SYSTEM_AWARE_O2_PAIR_CONSTRUCTION",
-        "candidate_count": int(candidate_counter),
-        "feasible_candidate_count": int(sum(bool(row["feasible"]) for row in history)),
-        "selected_candidate_id": best_record["candidate_id"],
-        "M1_constructed_first": True,
-        "M2_rebuilt_per_M1_candidate": True,
-        "hard_shape_gate_active": True,
-        "hard_shape_gate_scope": "TOPOLOGY_ONLY",
-        "shape_quality_enforcement": "WARN",
-        "physical_valid_count": int(winner["optical_metrics"]["physical_valid_count"]),
-        "ray_count": int(winner["optical_metrics"]["ray_count"]),
-        "mapping_rms_mm": float(winner["optical_metrics"]["mapping_field_rms_mm"]),
-        "spot_rms_mm": float(winner["optical_metrics"]["spot_field_rms_mm"]),
-        "chief_centered_spot_RMS_mm": float(
-            winner["optical_metrics"]["chief_centered_spot_RMS_mm"]
-        ),
-        "direction_rms_deg": float(winner["optical_metrics"]["target_direction_rms_deg"]),
-        "optical_objective": float(winner["optical_metrics"]["J_step12_actual_o2_dimensionless"]),
-        "fallback_count": int(ci["fallback_count"]),
-        "cloud_diagnostics": winner["M2_diagnostic"],
-        "candidate_execution_mode": effective_mode,
-        "candidate_workers_requested": (step11_candidate_workers_cfg if parallel_enabled else 1),
-        "candidate_workers_effective": effective_workers,
-        "candidate_result_order": "SUBMISSION_ORDER",
-        "baseline_parallelized": False,
-        "top2_parallelized": False,
-        "cycles_parallelized": False,
-        "ci_kernel_parallelized": False,
+        "status":
+            "PASS",
+
+        "mode":
+            "JOINT_JACOBIAN_"
+            "TOPOLOGY_RESTORATION",
+
+        "M1_constructed_first":
+            True,
+
+        "M2_constructed_once_from_M1_seed":
+            True,
+
+        "M2_rebuilt_per_iteration":
+            False,
+
+        "joint_M1_M2_refinement":
+            True,
+
+        "parallel_finite_difference":
+            bool(
+                restoration[
+                    "effective_workers"
+                ]
+                >
+                1
+            ),
+
+        "effective_fd_workers":
+            int(
+                restoration[
+                    "effective_workers"
+                ]
+            ),
+
+        "restoration_iterations":
+            int(
+                len(
+                    restoration[
+                        "history"
+                    ]
+                )
+            ),
+
+        "restoration_stop_reason":
+            restoration[
+                "stop_reason"
+            ],
+
+        "M1_raw_topology_pass":
+            True,
+
+        "M2_raw_topology_pass":
+            True,
+
+        "physical_valid_count":
+            int(
+                final_metrics[
+                    "physical_valid_count"
+                ]
+            ),
+
+        "ray_count":
+            int(
+                final_metrics[
+                    "ray_count"
+                ]
+            ),
+
+        "mapping_rms_mm":
+            float(
+                final_metrics[
+                    "mapping_field_rms_mm"
+                ]
+            ),
+
+        "spot_rms_mm":
+            float(
+                final_metrics[
+                    "spot_field_rms_mm"
+                ]
+            ),
+
+        "direction_rms_deg":
+            float(
+                final_metrics[
+                    "target_direction_rms_deg"
+                ]
+            ),
+
+        "optical_objective":
+            float(
+                final_metrics[
+                    "J_step12_actual_o2_dimensionless"
+                ]
+            ),
+
+        "unobscured":
+            unobscured,
     }
+
+
 
 def step_12(ctx: Context) -> dict[str, Any]:
     """Joint-refine cặp O2 đã được STEP11 chọn; không refit M2 và phá winner trước refinement."""

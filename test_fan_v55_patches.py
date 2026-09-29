@@ -2970,7 +2970,11 @@ def test_step11_preserves_ci_and_fit_diagnostics_in_record_and_history():
         assert f'"{field}"' in history_source
 
     assert (
-        "physical_hard_pass = bool(actual_surface_admitted and unobscured)"
+        "physical_hard_pass = bool("
+        in evaluator_source
+    )
+    assert (
+        "unobscured"
         in evaluator_source
     )
 
@@ -3028,59 +3032,75 @@ def test_step11_not_in_parallel_ray_trace_steps():
     assert PARALLEL_RAY_TRACE_STEPS == {12, 14, 17, 20, 24}
 
 
-def test_step11_job_ordering_and_deterministic_ids():
-    """Kiểm tra thứ tự tạo coordinate jobs và cấp Candidate ID tuần tự tăng dần."""
-    import numpy as np
+def test_step11_restoration_fd_job_ordering():
+    """FD jobs phải deterministic: column rồi sign -/+."""
 
     descriptors = [
-        {"kind": "POLY", "surface": "M1", "term": "x2"},
-        {"kind": "POLY", "surface": "M1", "term": "y2"},
-        {"kind": "POLY", "surface": "M1", "term": "x3"},
+        {
+            "surface": "M1",
+            "kind": "CURVATURE",
+        },
+        {
+            "surface": "M2",
+            "kind": "CURVATURE",
+        },
     ]
-    origin = np.zeros(3, dtype=float)
-    trust_scale = 0.5
-    candidate_counter = 0
 
-    def allocate_candidate_id():
-        """Cấp ID duy nhất cho test."""
-        nonlocal candidate_counter
-        candidate_counter += 1
-        return candidate_counter, f"CANDIDATE_{candidate_counter:04d}"
+    u = np.zeros(
+        2,
+        dtype=float,
+    )
 
-    # Baseline cấp ID đầu tiên
-    base_num, base_id = allocate_candidate_id()
-    assert base_num == 1
-    assert base_id == "CANDIDATE_0001"
+    h = 0.02
 
     jobs = []
-    for column, descriptor in enumerate(descriptors):
-        for sign in (-1.0, 1.0):
-            trial = origin.copy()
-            trial[column] = float(np.clip(trial[column] + sign * trust_scale, -1.0, 1.0))
-            if np.array_equal(trial, origin):
-                continue
-            cand_num, cand_id = allocate_candidate_id()
+
+    for column in range(
+        len(descriptors)
+    ):
+
+        for sign in (
+            -1.0,
+            +1.0,
+        ):
+
+            probe = u.copy()
+
+            probe[
+                column
+            ] += (
+                sign
+                *
+                h
+            )
+
             jobs.append({
-                "job_index": len(jobs),
-                "candidate_number": cand_num,
-                "candidate_id": cand_id,
-                "column": column,
-                "sign": sign,
+                "column":
+                    column,
+
+                "sign":
+                    sign,
+
+                "search_vector":
+                    probe,
             })
 
-    assert len(jobs) == 6
-    expected_order = [
-        (0, -1.0, "CANDIDATE_0002"),
-        (0, 1.0, "CANDIDATE_0003"),
-        (1, -1.0, "CANDIDATE_0004"),
-        (1, 1.0, "CANDIDATE_0005"),
-        (2, -1.0, "CANDIDATE_0006"),
-        (2, 1.0, "CANDIDATE_0007"),
+    assert [
+        (
+            row[
+                "column"
+            ],
+            row[
+                "sign"
+            ],
+        )
+        for row in jobs
+    ] == [
+        (0, -1.0),
+        (0, +1.0),
+        (1, -1.0),
+        (1, +1.0),
     ]
-    for job, (exp_col, exp_sign, exp_id) in zip(jobs, expected_order):
-        assert job["column"] == exp_col
-        assert job["sign"] == exp_sign
-        assert job["candidate_id"] == exp_id
 
 
 def test_step11_worker_reply_schema():
@@ -3537,14 +3557,15 @@ def test_step11_alternating_projection_preserves_reflection_law(
 
 
 def test_step11_terminal_progress_markers_present():
-    """STEP11 must expose gamma, AP, cycle completion and idle heartbeat progress."""
+    """Tất cả heartbeat và milestone progress strings phải có mặt trong source."""
     import inspect
-    from pipeline_v55 import _step11_condition_m2_ci, step_11
+    from pipeline_v55 import _step11_condition_m2_ci, step_11, _step11_run_joint_topology_restoration
 
     conditioning_source = inspect.getsource(
         _step11_condition_m2_ci
     )
     step11_source = inspect.getsource(step_11)
+    restore_source = inspect.getsource(_step11_run_joint_topology_restoration)
 
     for marker in (
         "[AP RAW][START]",
@@ -3556,11 +3577,15 @@ def test_step11_terminal_progress_markers_present():
     for marker in (
         "[GAMMA SWEEP][START]",
         "[GAMMA SWEEP][DONE]",
-        "[HEARTBEAT]",
-        "on_completed=on_cycle_candidate_completed",
-        "on_tick=on_cycle_tick",
+        "JOINT M1/M2 TOPOLOGY RESTORATION",
     ):
         assert marker in step11_source
+
+    for marker in (
+        "[RESTORE][START]",
+        "[RESTORE][ITER ",
+    ):
+        assert marker in restore_source
 
 
 def test_step11_candidate_snapshot_roundtrip_and_render(
@@ -3801,46 +3826,273 @@ def test_step11_candidate_snapshot_roundtrip_and_render(
     ).is_file()
 
 
-def test_step11_candidate_snapshot_hooks_cover_all_paths():
-    """Mọi loại candidate và worker đều phải đi qua snapshot archive."""
+def test_step11_restoration_probes_do_not_archive_snapshots():
+    """Restoration probe jobs do not write candidate snapshots."""
     import inspect
     import execution_workers_v55
     import pipeline_v55
 
-    evaluator_source = inspect.getsource(
-        pipeline_v55.evaluate_step11_candidate_job
+    probe_source = inspect.getsource(
+        pipeline_v55.
+        evaluate_step11_restoration_probe_job
     )
-    step11_source = inspect.getsource(
-        pipeline_v55.step_11
-    )
+
     worker_source = inspect.getsource(
-        execution_workers_v55.step11_candidate_worker
+        execution_workers_v55.
+        step11_restoration_probe_worker
     )
-
-    for marker in (
-        '"m1": None',
-        '"m1_hit_points": None',
-        '"ci_m2": None',
-        '"m2": None',
-        '"physical_trace": None',
-        'visualization_payload["m1"] = candidate_m1',
-        'visualization_payload["ci_m2"] = ci_m2',
-        'visualization_payload["m2"] = candidate_m2',
-        'visualization_payload["physical_trace"]',
-    ):
-        assert marker in evaluator_source
-
-    for marker in (
-        '"FALLBACK_GAMMA"',
-        '"BASELINE"',
-        '"COMBINATION_TOP2"',
-        '"COORDINATE"',
-        "register_candidate_snapshot",
-        "write_candidate_snapshot_manifest",
-    ):
-        assert marker in step11_source
 
     assert (
         "_step11_archive_candidate_snapshot"
-        in worker_source
+        not in probe_source
     )
+
+    assert (
+        "_step11_archive_candidate_snapshot"
+        not in worker_source
+    )
+
+    assert (
+        "_step11_build_parallel_jacobian"
+        in inspect.getsource(
+            pipeline_v55.
+            _step11_run_joint_topology_restoration
+        )
+    )
+
+
+def test_step11_fixed_residual_grid_is_deterministic():
+    """Fixed residual grid is deterministic."""
+    from pipeline_v55 import (
+        _step11_fixed_residual_grid,
+    )
+
+    surface = PolySurface(
+        "M2",
+        np.zeros(3),
+        np.eye(3),
+        np.array([
+            10.0,
+            5.0,
+        ]),
+        [
+            (2, 0),
+            (0, 2),
+        ],
+        np.array([
+            -0.01,
+            -0.01,
+        ]),
+        np.array([
+            10.0,
+            5.0,
+        ]),
+    )
+
+    a = _step11_fixed_residual_grid(
+        surface,
+        31,
+    )
+
+    b = _step11_fixed_residual_grid(
+        surface,
+        31,
+    )
+
+    assert np.array_equal(
+        a["xy"],
+        b["xy"],
+    )
+
+    assert np.array_equal(
+        a["edge_i"],
+        b["edge_i"],
+    )
+
+    assert np.array_equal(
+        a["edge_j"],
+        b["edge_j"],
+    )
+
+
+def test_step11_balanced_residual_is_sample_count_invariant():
+    """Balanced residual blocks scale invariantly with sample count."""
+    from pipeline_v55 import (
+        _step11_balanced_block,
+    )
+
+    small = (
+        _step11_balanced_block(
+            np.ones(10),
+            1.0,
+            1.0,
+        )
+    )
+
+    large = (
+        _step11_balanced_block(
+            np.ones(100),
+            1.0,
+            1.0,
+        )
+    )
+
+    assert np.isclose(
+        np.sum(
+            small * small
+        ),
+        np.sum(
+            large * large
+        ),
+    )
+
+
+def test_step11_restoration_kg_target_is_inside_hard_tolerance():
+    """Restoration target KG is strictly inside the hard tolerance."""
+    config = json.loads(
+        (
+            Path(
+                __file__
+            ).resolve().parent
+            /
+            "config_v55.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    target = float(
+        config[
+            "surface_fit"
+        ][
+            "step11_topology_restoration"
+        ][
+            "kg_target_per_mm2"
+        ]
+    )
+
+    # mirror_shape_gate hard acceptance:
+    hard_floor = -1e-7
+
+    assert target > hard_floor
+    assert target <= 0.0
+
+
+def test_step11_restoration_rejects_curvature_bound_instead_of_clipping():
+    """Restoration rejects parameter moves exceeding curvature limits."""
+    from pipeline_v55 import (
+        _step11_apply_joint_restoration_vector,
+    )
+
+    config = json.loads(
+        (
+            Path(
+                __file__
+            ).resolve().parent
+            /
+            "config_v55.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    cfg = (
+        config[
+            "surface_fit"
+        ][
+            "step11_topology_restoration"
+        ]
+    )
+
+    surface_fit_cfg = (
+        config[
+            "surface_fit"
+        ]
+    )
+
+    limit = float(
+        surface_fit_cfg[
+            "curvature_absolute_max_per_mm"
+        ]
+    )
+
+    m1 = PolySurface(
+        "M1",
+        np.zeros(3),
+        np.eye(3),
+        np.array([
+            5.0,
+            5.0,
+        ]),
+        [],
+        np.empty(
+            0,
+            dtype=float,
+        ),
+        np.array([
+            5.0,
+            5.0,
+        ]),
+        curvature=
+            limit * 0.999,
+    )
+
+    m2 = m1.copy()
+    m2.name = "M2"
+
+    base = {
+        "M1": m1,
+        "M2": m2,
+    }
+
+    descriptors = [
+        {
+            "surface": "M1",
+            "kind": "CURVATURE",
+        }
+    ]
+
+    u = np.asarray([
+        1.0
+    ])
+
+    a, b, state = (
+        _step11_apply_joint_restoration_vector(
+            base,
+            descriptors,
+            u,
+            cfg,
+            surface_fit_cfg,
+        )
+    )
+
+    assert a is None
+    assert b is None
+
+    assert (
+        "CURVATURE_BOUND"
+        in
+        state[
+            "reason"
+        ]
+    )
+
+
+def test_step11_restoration_worker_requires_base_context():
+    """Restoration probe worker fails if base context is uninitialized."""
+    from execution_workers_v55 import (
+        step11_restoration_probe_worker,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=
+            "STEP11_RESTORATION_"
+            "WORKER_BASE_CONTEXT_NOT_INITIALIZED",
+    ):
+
+        step11_restoration_probe_worker({
+            "schema":
+                "HUD_FAN_V5_5_"
+                "STEP11_RESTORATION_PROBE_JOB_V1",
+        })

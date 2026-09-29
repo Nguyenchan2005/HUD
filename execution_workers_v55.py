@@ -535,3 +535,120 @@ def step11_candidate_worker(
         "last_phase": last_phase,
     }
 
+
+def step11_restoration_probe_worker(
+    job: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Evaluate đúng một +delta hoặc -delta
+    của STEP11 restoration Jacobian.
+    """
+
+    import os
+
+    from execution_v55 import (
+        current_runtime,
+    )
+
+    from pipeline_v55 import (
+        evaluate_step11_restoration_probe_job,
+    )
+
+    if _BASE_CONTEXT is None:
+        raise RuntimeError(
+            "STEP11_RESTORATION_"
+            "WORKER_BASE_CONTEXT_NOT_INITIALIZED"
+        )
+
+    if (
+        job.get(
+            "schema"
+        )
+        !=
+        "HUD_FAN_V5_5_"
+        "STEP11_RESTORATION_PROBE_JOB_V1"
+    ):
+        raise ValueError(
+            "STEP11_RESTORATION_"
+            "INVALID_JOB_SCHEMA"
+        )
+
+    runtime = current_runtime()
+
+    if runtime is not None:
+        runtime.record(
+            "JOB_STARTED",
+            kind=
+                "STEP11_RESTORATION_PROBE",
+            iteration=
+                int(
+                    job[
+                        "iteration"
+                    ]
+                ),
+            column=
+                int(
+                    job[
+                        "column"
+                    ]
+                ),
+            sign=
+                float(
+                    job[
+                        "sign"
+                    ]
+                ),
+        )
+
+    try:
+
+        result = (
+            evaluate_step11_restoration_probe_job(
+                _BASE_CONTEXT,
+                job,
+            )
+        )
+
+    except Exception as exc:
+
+        raise RuntimeError(
+            "STEP11_RESTORATION_PROBE_FAILED:"
+            f"iteration={job.get('iteration')}:"
+            f"column={job.get('column')}:"
+            f"sign={job.get('sign')}:"
+            f"pid={os.getpid()}:"
+            f"{type(exc).__name__}:{exc}"
+        ) from exc
+
+    if runtime is not None:
+        runtime.record(
+            "JOB_COMPLETED",
+            kind=
+                "STEP11_RESTORATION_PROBE",
+            iteration=
+                int(
+                    job[
+                        "iteration"
+                    ]
+                ),
+            column=
+                int(
+                    job[
+                        "column"
+                    ]
+                ),
+            sign=
+                float(
+                    job[
+                        "sign"
+                    ]
+                ),
+        )
+
+    return {
+        **result,
+
+        "pid":
+            os.getpid(),
+    }
+
