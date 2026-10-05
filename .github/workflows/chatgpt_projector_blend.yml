@@ -1,0 +1,24 @@
+name: Build projector blend
+on:
+  push:
+    paths:
+      - 'chatgpt_blend_build/**'
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Blender and OpenSCAD
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y blender openscad
+      - name: Build blend
+        working-directory: chatgpt_blend_build
+        run: blender -b --python make_projector_blend.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: projector-box-blend
+          path: |
+            chatgpt_blend_build/projector_box_ST7735_LCD_only_v2_assembly.blend
+            chatgpt_blend_build/projector_box_ST7735_LCD_only_v2_assembly_preview.png
