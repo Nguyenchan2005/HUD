@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - 'chatgpt_blend_build/**'
+  pull_request:
   workflow_dispatch:
 jobs:
   build:
